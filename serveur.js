@@ -7,7 +7,12 @@ const { PartieCanasta } = require('./serveur-logique/jeu');
 
 const app = express();
 const serveur = http.createServer(app);
-const io = new Server(serveur);
+const io = new Server(serveur, {
+    cors: {
+        origin: "*", 
+        methods: ["GET", "POST"]
+    }
+});
 
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/favicon.ico', (req, res) => res.status(204).end());
