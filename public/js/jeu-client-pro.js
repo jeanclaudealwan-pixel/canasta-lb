@@ -938,8 +938,22 @@ function rendreMelds(equipeData, conteneurId) {
     if (!conteneur) return;
     
     // Réinitialiser le titre
-    const labelText = conteneurId === 'melds-equipe' ? 'Descente Nous' : 'Descente Eux';
-    conteneur.innerHTML = `<div class="meld-label">${labelText}</div>`;
+    const name = conteneurId === 'melds-equipe' ? 'NOUS' : 'EUX';
+    const color = conteneurId === 'melds-equipe' ? '#60b3ff' : '#ff6b6b';
+    
+    let labelHTML = `<div class="label-left" style="display:flex; align-items:center;">Descente ${name}</div>`;
+    
+    if (equipeData) {
+        let rightSide = `<div style="display:flex; align-items:center; gap:6px;">`;
+        if (!equipeData.aOuvert) {
+            rightSide += `<span style="font-size:9px; color:#f2c516; font-weight:800; background:rgba(242,197,22,0.15); padding:2px 4px; border-radius:5px; box-shadow:0 0 5px rgba(242,197,22,0.2);" title="Objectif d'ouverture">🎯${equipeData.seuilOuverture}</span>`;
+        }
+        rightSide += `<span style="color:${color}; font-size:16px; font-weight:900; letter-spacing:-0.5px; text-shadow:0 0 10px ${color}50, 0 2px 4px rgba(0,0,0,0.6);">${equipeData.score}</span>`;
+        rightSide += `</div>`;
+        labelHTML += rightSide;
+    }
+    
+    conteneur.innerHTML = `<div class="meld-label">${labelHTML}</div>`;
     
     if (!equipeData) return;
 
@@ -951,8 +965,8 @@ function rendreMelds(equipeData, conteneurId) {
         bonus.style.padding = '2px 5px';
         bonus.style.fontSize = '8px';
         bonus.textContent = `♦ 3 rouge × ${equipeData.troisRouges.length}`;
-        const currentTitle = conteneur.querySelector('.meld-label');
-        if (currentTitle) currentTitle.appendChild(bonus);
+        const labelLeft = conteneur.querySelector('.label-left');
+        if (labelLeft) labelLeft.appendChild(bonus);
     }
 
     const valeursTriees = Object.keys(equipeData.table).sort((a,b) => a - b);
@@ -1131,11 +1145,8 @@ function rendreScoresEtTour(etat) {
     const pctAdversaire = Math.max(0, Math.min(100, (dataAutreEq.score / 15000) * 100));
 
     const pEq = document.getElementById('progression-eq'); if(pEq) pEq.style.width = pctEquipe + '%';
-    document.getElementById('score-equipe-text').innerHTML = `<div style="display:flex; flex-direction:column; align-items:flex-end; line-height:1;"><span>${dataMonEq.score}</span>` + (!dataMonEq.aOuvert ? `<span style="font-size:10px; color:rgba(255,255,255,0.4); font-weight:normal; margin-top:2px;" title="Objectif d'ouverture">🎯${dataMonEq.seuilOuverture}</span>` : '') + `</div>`;
-
     const pAdv = document.getElementById('progression-adv'); if(pAdv) pAdv.style.width = pctAdversaire + '%';
-    document.getElementById('score-adverse-text').innerHTML = `<div style="display:flex; flex-direction:column; align-items:flex-end; line-height:1;"><span>${dataAutreEq.score}</span>` + (!dataAutreEq.aOuvert ? `<span style="font-size:10px; color:rgba(255,255,255,0.4); font-weight:normal; margin-top:2px;" title="Objectif d'ouverture">🎯${dataAutreEq.seuilOuverture}</span>` : '') + `</div>`;
-
+    
     mettreAJourIndicateurTour();
 }
 
@@ -1143,6 +1154,29 @@ function mettreAJourIndicateurTour() {
     if (!etatGlobal) return;
     const indic = document.getElementById('indicateur-tour');
     if (!indic) return;
+
+    // --- MISE A JOUR DES STYLES DE TOUR ACTIF ---
+    // Nettoyer les classes actives partout
+    document.querySelectorAll('.opponent').forEach(el => el.classList.remove('tour-actif'));
+    const mainEl = document.getElementById('conteneur-main');
+    if (mainEl) mainEl.classList.remove('tour-actif');
+    
+    // Ajouter la classe au joueur actif
+    if (etatGlobal.tourActuel === monNumero) {
+        if (mainEl) mainEl.classList.add('tour-actif');
+    } else {
+        const mapPos = {
+            [(monNumero % 4) + 1]: 'gauche',
+            [((monNumero + 1) % 4) + 1]: 'haut',
+            [((monNumero + 2) % 4) + 1]: 'droite'
+        };
+        const posActif = mapPos[etatGlobal.tourActuel];
+        if (posActif) {
+            const advEl = document.getElementById('adv-' + posActif);
+            if (advEl) advEl.classList.add('tour-actif');
+        }
+    }
+    // --------------------------------------------
 
     if (groupesPrepares && groupesPrepares.length > 0) {
         let scorePose = 0;
@@ -1467,6 +1501,37 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ANIMATIONS
+function animerCarte(sourceEl, destEl, classNameSupp) {
+    if (!sourceEl || !destEl) return;
+    const tempCard = document.createElement('div');
+    tempCard.className = 'animated-card-throw ' + (classNameSupp || '');
+    document.body.appendChild(tempCard);
+
+    const rectSource = sourceEl.getBoundingClientRect();
+    const rectDest = destEl.getBoundingClientRect();
+    
+    const startX = rectSource.left + rectSource.width / 2 - 13;
+    const startY = rectSource.top + rectSource.height / 2 - 18;
+    
+    tempCard.style.left = startX + 'px';
+    tempCard.style.top = startY + 'px';
+    
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+            const endX = rectDest.left + rectDest.width / 2 - 13;
+            const endY = rectDest.top + rectDest.height / 2 - 18;
+            tempCard.style.left = endX + 'px';
+            tempCard.style.top = endY + 'px';
+            tempCard.style.transform = 'scale(1.2) rotate(360deg)';
+            tempCard.style.opacity = '0';
+        });
+    });
+    
+    setTimeout(() => {
+        if (tempCard.parentNode) tempCard.parentNode.removeChild(tempCard);
+    }, 500);
+}
+
 socket.on('animationDescendre', (numeroJoueur) => {
     if (numeroJoueur === monNumero) return; // on ne s'anime pas soi-même (déjà vu)
     

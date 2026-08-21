@@ -7,12 +7,7 @@ const { PartieCanasta } = require('./serveur-logique/jeu');
 
 const app = express();
 const serveur = http.createServer(app);
-const io = new Server(serveur, {
-    cors: {
-        origin: "*", 
-        methods: ["GET", "POST"]
-    }
-});
+const io = new Server(serveur);
 
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/favicon.ico', (req, res) => res.status(204).end());
@@ -20,9 +15,7 @@ app.get('/favicon.ico', (req, res) => res.status(204).end());
 let salons = {}; // Map of roomId -> room object
 let prochainSalonId = 1;
 let joueursDansSalons = {}; // { socketId: roomId }
-let deconnexionsPendantPartie = {};
-let profilsJoueurs = {};
-let tokenToSocket = {};
+let deconnexionsPendantPartie = {}; // { token: { roomId, numero, timeout } }
 
 function getSalonPourSocket(socketId) {
     const salonId = joueursDansSalons[socketId];
@@ -39,97 +32,29 @@ class BotJoueur {
     jouerTour() {
         setTimeout(() => {
             if (!this.partie || !this.partie.enJeu) return;
-            
-            let aRamasseTerre = false;
-            const equipe = this.partie.equipes[this.partie.equipeDuJoueur(this.numero)];
-            const defausse = this.partie.defausse;
-            const mainInitiale = this.partie.joueurs[this.numero].main;
-
-            // Essayer de ramasser la terre si on a déjà ouvert
-            if (equipe && equipe.aOuvert && defausse.length > 0) {
-                const carteDessus = defausse[defausse.length - 1];
-                if (!carteDessus.estJoker && carteDessus.valeur !== '2' && !carteDessus.est3Noir) {
-                    const pileGelee = defausse.some(c => c.estJoker || c.valeur === '2');
-                    const nbRequis = pileGelee ? 3 : 2;
-                    const cartesRequises = mainInitiale.filter(c => !c.estJoker && c.valeur === carteDessus.valeur).slice(0, nbRequis);
-                    
-                    if (cartesRequises.length === nbRequis) {
-                        const resTerre = this.partie.actionRamasserTerre(this.numero, []); // Pas besoin de groupes d'ouverture car déjà ouvert
-                        if (resTerre.ok) {
-                            aRamasseTerre = true;
-                            diffuserEtatGlobal(this.salon);
-                        }
-                    }
+            const resPiocher = this.partie.actionPiocher(this.numero);
+            if (resPiocher.ok) {
+                if (resPiocher.piocheEpuisee) {
+                    gererFinManche(this.salon, { recapManche: resPiocher.recapManche });
+                    return;
                 }
-            }
-
-            if (!aRamasseTerre) {
-                const resPiocher = this.partie.actionPiocher(this.numero);
-                if (resPiocher.ok) {
-                    if (resPiocher.piocheEpuisee) {
-                        gererFinManche(this.salon, { recapManche: resPiocher.recapManche });
-                        return;
-                    }
-                    diffuserEtatGlobal(this.salon);
-                }
+                diffuserEtatGlobal(this.salon);
             }
             
             const main = this.partie.joueurs[this.numero].main;
             const valMap = {};
             for (let c of main) {
                 if (!c.estJoker && c.valeur !== '2' && c.valeur !== '3') {
-                    if (!valMap[c.valeur]) valMap[c.valeur] = [];
-                    valMap[c.valeur].push(c);
+                    valMap[c.valeur] = (valMap[c.valeur] || 0) + 1;
                 }
             }
-
-            const groupesAProposer = [];
-            
-            // 1. Ajouter aux combinaisons existantes
-            if (equipe && equipe.aOuvert) {
-                for (let key in equipe.table) {
-                    let combi = equipe.table[key];
-                    if (combi.estCanasta) continue; // Pour faire simple, on n'ajoute pas aux canastas pour l'instant
-                    let targetValue = combi.valeur;
-                    if (valMap[targetValue] && valMap[targetValue].length > 0) {
-                        groupesAProposer.push({
-                            valeur: key,
-                            cartesId: valMap[targetValue].map(c => c.id)
-                        });
-                        delete valMap[targetValue]; // On a utilisé toutes ces cartes
-                    }
-                }
-            }
-
-            // 2. Créer de nouvelles combinaisons avec au moins 3 cartes naturelles
-            for (let v in valMap) {
-                if (valMap[v].length >= 3) {
-                    groupesAProposer.push({
-                        cartesId: valMap[v].map(c => c.id)
-                    });
-                }
-            }
-
-            if (groupesAProposer.length > 0) {
-                // Vérifier si le bot tente d'ouvrir et s'il a assez de points
-                let peutDescendre = true;
-                if (equipe && !equipe.aOuvert) {
-                    let pointsOuverture = 0;
-                    for (let g of groupesAProposer) {
-                        for (let id of g.cartesId) {
-                            let carte = mainInitiale.find(c => c.id === id);
-                            if (carte) pointsOuverture += carte.points;
-                        }
-                    }
-                    if (pointsOuverture < (equipe.seuilOuverture || 60)) {
-                        peutDescendre = false; // Trop peu de points, on s'abstient pour ne pas pénaliser l'équipe !
-                    }
-                }
-
-                if (peutDescendre) {
-                    const resDescendre = this.partie.actionDescendreCombinaisons(this.numero, groupesAProposer);
-                    if (resDescendre.ok) diffuserEtatGlobal(this.salon);
-                }
+            const valeursMultiples = Object.keys(valMap).filter(v => valMap[v] >= 3);
+            if (valeursMultiples.length > 0) {
+                const groupes = valeursMultiples.map(v => ({
+                    cartesId: main.filter(c => c.valeur === v).map(c => c.id)
+                }));
+                const resDescendre = this.partie.actionDescendreCombinaisons(this.numero, groupes);
+                if (resDescendre.ok) { diffuserAnimation(this.salon, "animationDescendre", this.numero); diffuserEtatGlobal(this.salon); }
             }
             
             let jeterId = main[0].id;
@@ -144,6 +69,7 @@ class BotJoueur {
             
             const resJeter = this.partie.actionJeter(this.numero, jeterId);
             if (resJeter.ok) {
+                diffuserAnimation(this.salon, 'animationJeter', this.numero);
                 if (resJeter.mancheTerminee) {
                     gererFinManche(this.salon, resJeter);
                 } else {
@@ -179,8 +105,7 @@ function gererFinManche(salon, resultat) {
         // Redémarrer automatiquement dans 10 secondes
         setTimeout(() => {
             if (salon && salon.partie && !salon.partie.enJeu) {
-                salon.indexDonneur = (salon.indexDonneur % 4) + 1;
-                salon.partie.demarrerNouvelleManche(salon.indexDonneur);
+                salon.partie.demarrerNouvelleManche(salon.partie.prochainPremierJoueur);
                 diffuserChangementTour(salon, salon.partie.tourActuel);
                 verifierTourBot(salon, salon.partie.tourActuel);
                 diffuserEtatGlobal(salon);
@@ -240,7 +165,7 @@ function envoyerMiseAJourSalon(salon) {
     for (let sId in salon.joueurs) {
         joueursArray.push({
             numero: salon.joueurs[sId],
-            nom: sId.startsWith('bot-') ? 'Bot' : (profilsJoueurs[sId] ? profilsJoueurs[sId].pseudo : 'Joueur'), avatar: profilsJoueurs[sId] ? profilsJoueurs[sId].avatar : '👤',
+            nom: sId.startsWith('bot-') ? 'Bot' : 'Joueur',
             estBot: sId.startsWith('bot-')
         });
     }
@@ -268,8 +193,6 @@ function quitterLeSalon(socketId) {
         let numeroLibere = salon.joueurs[socketId];
         
         if (salon.enCours) {
-            diffuserAlerte(salon, `Joueur ${numeroLibere} est déconnecté (En attente...)`);
-            io.to(salon.id).emit('joueurDeconnecte', numeroLibere);
             deconnexionsPendantPartie[socketId] = {
                 roomId: salon.id,
                 numero: numeroLibere,
@@ -311,8 +234,6 @@ io.on('connection', (socket) => {
     
     socket.emit('listeSalons', getListeSalonsData());
 
-    socket.on('setProfil', (profil) => { profilsJoueurs[socket.id] = profil;
-        if (profil.token) tokenToSocket[profil.token] = socket.id; });
     socket.on('listerSalons', () => {
         socket.emit('listeSalons', getListeSalonsData());
     });
@@ -348,7 +269,7 @@ io.on('connection', (socket) => {
         socket.emit('salonCree', {
             id: salonId,
             nom: nom,
-            joueurs: [{ numero: numeroJoueur, nom: profilsJoueurs[socket.id] ? profilsJoueurs[socket.id].pseudo : 'Joueur', avatar: profilsJoueurs[socket.id] ? profilsJoueurs[socket.id].avatar : '👤', estBot: false }],
+            joueurs: [{ numero: numeroJoueur, nom: 'Joueur', estBot: false }],
             hote: socket.id
         });
         socket.emit('attributionSiege', numeroJoueur);
@@ -376,7 +297,7 @@ io.on('connection', (socket) => {
                 id: salon.id,
                 nom: salon.nom,
                 joueurs: Object.keys(salon.joueurs).map(sId => ({
-                    numero: salon.joueurs[sId], nom: sId.startsWith('bot-') ? 'Bot' : (profilsJoueurs[sId] ? profilsJoueurs[sId].pseudo : 'Joueur'), avatar: profilsJoueurs[sId] ? profilsJoueurs[sId].avatar : '👤', estBot: sId.startsWith('bot-')
+                    numero: salon.joueurs[sId], nom: sId.startsWith('bot-') ? 'Bot' : 'Joueur', estBot: sId.startsWith('bot-')
                 })),
                 hote: salon.hote,
                 monNumero: numeroJoueur
@@ -391,7 +312,7 @@ io.on('connection', (socket) => {
                 id: salon.id,
                 nom: salon.nom,
                 joueurs: Object.keys(salon.joueurs).map(sId => ({
-                    numero: salon.joueurs[sId], nom: sId.startsWith('bot-') ? 'Bot' : (profilsJoueurs[sId] ? profilsJoueurs[sId].pseudo : 'Joueur'), avatar: profilsJoueurs[sId] ? profilsJoueurs[sId].avatar : '👤', estBot: sId.startsWith('bot-')
+                    numero: salon.joueurs[sId], nom: sId.startsWith('bot-') ? 'Bot' : 'Joueur', estBot: sId.startsWith('bot-')
                 })),
                 hote: salon.hote,
                 monNumero: null
@@ -400,32 +321,6 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('choisirSiege', (siege) => {
-        const salonId = joueursDansSalons[socket.id];
-        if (!salonId) return;
-        const salon = salons[salonId];
-        if (!salon || salon.enCours) return;
-        
-        if (siege < 1 || siege > 4) return;
-        const estPris = Object.values(salon.joueurs).includes(siege);
-        if (estPris) {
-            socket.emit('alerteJeu', 'Ce siège est déjà pris.');
-            return;
-        }
-
-        const ancienSiege = salon.joueurs[socket.id];
-        if (ancienSiege) {
-            salon.placesDisponibles.push(ancienSiege);
-        } else {
-            salon.spectateurs.delete(socket.id);
-        }
-
-        salon.joueurs[socket.id] = siege;
-        salon.placesDisponibles = salon.placesDisponibles.filter(p => p !== siege);
-
-        socket.emit('attributionSiege', siege);
-        envoyerMiseAJourSalon(salon);
-    });
     socket.on('quitterSalon', () => {
         quitterLeSalon(socket.id);
         socket.emit('listeSalons', getListeSalonsData());
@@ -466,8 +361,7 @@ io.on('connection', (socket) => {
         }
 
         diffuserAlerte(salon, "La table est complète ! Distribution des cartes...");
-        salon.indexDonneur = salon.joueurs[salon.hote] || 1;
-        salon.partie.demarrerNouvellePartie(salon.indexDonneur);
+        salon.partie.demarrerNouvellePartie();
         diffuserEtatGlobal(salon);
         diffuserChangementTour(salon, salon.partie.tourActuel);
         verifierTourBot(salon, salon.partie.tourActuel);
@@ -486,6 +380,7 @@ io.on('connection', (socket) => {
         let resultat = salon.partie.actionJeter(numeroJoueur, carteId);
         
         if (resultat.ok) {
+            diffuserAnimation(salon, 'animationJeter', numeroJoueur);
             if (resultat.mancheTerminee) {
                 gererFinManche(salon, resultat);
             } else {
@@ -541,8 +436,8 @@ io.on('connection', (socket) => {
         if (!numeroJoueur) return;
 
         let resultat = salon.partie.actionDescendreCombinaisons(numeroJoueur, groupesProposees);
-
         if (resultat.ok) {
+            diffuserAnimation(salon, 'animationDescendre', numeroJoueur);
             socket.emit('alerteJeu', "Combinaisons validées !");
             if (resultat.mancheTerminee) {
                 envoyerMiseAJourSalon(salon);
@@ -641,8 +536,6 @@ io.on('connection', (socket) => {
     });
 
     socket.on('tentativeReconnexion', (token) => {
-        let oldId = tokenToSocket[token] || token;
-        token = oldId; // proceed with old socket.id equivalent
         if (deconnexionsPendantPartie[token]) {
             let data = deconnexionsPendantPartie[token];
             clearTimeout(data.timeout);
@@ -694,6 +587,15 @@ io.on('connection', (socket) => {
 });
 
 const PORT = process.env.PORT || 3000;
-serveur.listen(PORT, '0.0.0.0', () => {
-    console.log(`Serveur Canasta démarré sur le port ${PORT}`);
+serveur.listen(PORT, () => {
+    console.log(`Serveur Canasta démarré sur http://localhost:${PORT}`);
 });
+function diffuserAnimation(salon, nomAnimation, numJoueur) {
+    if (!salon) return;
+    for (let sId in salon.joueurs) {
+        if (!sId.startsWith('bot-')) io.to(sId).emit(nomAnimation, numJoueur);
+    }
+    for (let sId of salon.spectateurs) {
+        io.to(sId).emit(nomAnimation, numJoueur);
+    }
+}

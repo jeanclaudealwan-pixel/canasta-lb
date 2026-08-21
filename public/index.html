@@ -94,6 +94,7 @@
     <p>La table de Canasta est conçue pour le mode paysage — pivotez l'appareil pour jouer.</p>
   </div>
   <div class="table-wrap">
+    <!-- Compact Scoreboard (Top Left) -->
     <div style="position:absolute; top:calc(8px + var(--safe-t)); right:calc(8px + var(--safe-r)); z-index:50; display:flex; flex-direction:column; gap:8px;">
         <button class="menu-btn" style="position:static;"><svg class="icon"><use href="#i-menu"/></svg></button>
         <button id="btn-emoji" style="width:32px; height:32px; display:flex; align-items:center; justify-content:center; background:var(--panel-strong); border:1px solid var(--line); border-radius:9px; font-size:18px; cursor:pointer;" title="Envoyer Emoji">😀</button>
@@ -181,17 +182,7 @@
           <span class="frozen-badge"><svg class="icon"><use href="#i-lock"/></svg>Gelée</span>
         </div>
         
-        <!-- Compact Scoreboard -->
-        <div id="compact-scoreboard" style="display:flex; flex-direction:column; gap:5px; background:rgba(0,0,0,0.4); padding:6px 12px; border-radius:10px; border:1px solid rgba(255,255,255,0.1); box-shadow:0 4px 12px rgba(0,0,0,0.4); backdrop-filter:blur(4px); margin-top: auto; margin-bottom: 10px; width: max-content; align-self: center;">
-           <div id="score-equipe-container" style="display:flex; justify-content:space-between; align-items:center; gap:15px;">
-             <span style="font-size:10px; font-weight:700; color:rgba(255,255,255,0.6); letter-spacing:1px;">NOUS</span>
-             <span id="score-equipe-text" style="color:var(--blue); font-size:16px; font-weight:800; text-shadow:0 1px 2px rgba(0,0,0,0.5);">0</span>
-           </div>
-           <div id="score-adverse-container" style="display:flex; justify-content:space-between; align-items:center; gap:15px;">
-             <span style="font-size:10px; font-weight:700; color:rgba(255,255,255,0.6); letter-spacing:1px;">EUX</span>
-             <span id="score-adverse-text" style="color:var(--red); font-size:16px; font-weight:800; text-shadow:0 1px 2px rgba(0,0,0,0.5);">0</span>
-           </div>
-        </div>
+
       </div>
       <!-- Eux (Droite) -->
       <div id="melds-adversaire" class="meld-col eux">
@@ -280,4 +271,9 @@
     <div id="toast-container"></div>
 </body>
 </html>
+
+
+
+
+
 

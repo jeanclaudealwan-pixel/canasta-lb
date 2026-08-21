@@ -116,7 +116,7 @@
 
   /* ---------- Opponents ---------- */
   .opponent{position:absolute;display:flex;flex-direction:column;align-items:center;gap:3px;z-index:30;}
-  .opponent-top{top:calc(6px + var(--safe-t));left:calc(10px + var(--safe-l));transform:none;flex-direction:column;}
+  .opponent-top{top:calc(6px + var(--safe-t));left:50%;transform:translateX(-50%);flex-direction:column;}
   .opponent-left{left:calc(10px + var(--safe-l));top:47%;transform:translateY(-50%);}
   .opponent-right{right:calc(10px + var(--safe-r));top:47%;transform:translateY(-50%);}
 
@@ -146,7 +146,7 @@
   /* ---------- Main play surface ---------- */
   .table-area{
     height:100%;display:flex;flex-direction:row;justify-content:space-between;align-items:stretch;gap:15px;
-    padding:calc(15px + var(--safe-t)) 70px calc(110px + var(--safe-b)) 95px;
+    padding:calc(15px + var(--safe-t)) 90px calc(110px + var(--safe-b)) 90px;
   }
 
   .meld-col{
@@ -156,7 +156,7 @@
   }
   .meld-col.nous{border-color:rgba(63,160,224,.32);}
   .meld-col.eux{border-color:rgba(230,72,63,.32);}
-  .meld-label{grid-column: 1 / -1; font-size:10px;font-weight:700;color:rgba(255,255,255,.5);text-transform:uppercase;letter-spacing:.04em;width:100%;margin-bottom:2px;}
+  .meld-label{grid-column: 1 / -1; display:flex; justify-content:space-between; align-items:center; font-size:10px;font-weight:700;color:rgba(255,255,255,.5);text-transform:uppercase;letter-spacing:.04em;width:100%;margin-bottom:2px;}
 
   /* canasta group: up to 7 slots, closed groups get a coloured cap */
   .canasta{display:flex;align-items:center;gap:2px;background:rgba(255,255,255,.04);border-radius:6px;padding:2px 4px 2px 2px;}
@@ -177,7 +177,7 @@
   .bonus-chip{font-size:8.5px;font-weight:700;color:var(--red);background:rgba(230,72,63,.15);border:1px solid rgba(230,72,63,.4);padding:2.5px 7px;border-radius:8px;white-space:nowrap;}
   .meld-ghost{width:18px;height:26px;border:1px dashed rgba(255,255,255,.3);border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:11px;color:rgba(255,255,255,.35);}
 
-  .center-piles{display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:35px;padding:0 10px;position:relative; width:90px; margin-top:-5px;}
+  .center-piles{display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:35px;padding:0 10px;position:relative; width:90px; margin-top: 65px;}
 
   .draw-stack{position:relative;width:clamp(50px,9vh,64px);height:clamp(70px,13vh,90px);}
   .draw-layer{
@@ -250,4 +250,31 @@
     z-index: 9999;
     transition: all 0.6s cubic-bezier(0.25, 0.8, 0.25, 1);
     pointer-events: none;
+}
+
+/* --- Styles pour le tour actif et animations --- */
+.tour-actif .avatar {
+    box-shadow: 0 0 20px 8px rgba(242, 197, 22, 0.6);
+    border-color: var(--gold);
+}
+.tour-actif .avatar-name {
+    color: var(--gold);
+    font-weight: 800;
+    background: rgba(0,0,0,0.8);
+}
+.tour-actif.hand {
+    box-shadow: 0 0 30px rgba(242, 197, 22, 0.4) inset;
+    border-radius: 12px;
+}
+.animated-card-throw {
+    width: 26px;
+    height: 36px;
+    border-radius: 4px;
+    background: repeating-linear-gradient(135deg, #2c6cb5 0 2px, #245a95 2px 4px);
+    border: 1px solid white;
+    position: fixed;
+    z-index: 9999;
+    pointer-events: none;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+    transition: all 0.5s cubic-bezier(0.25, 0.8, 0.25, 1);
 }
