@@ -74,6 +74,7 @@ const socket = io();
 let ecranActuel = 'lobby'; // lobby | salon | jeu
 let monNumero = null;
 let estSpectateur = false;
+let cartesRecemmentPiochees = new Set();
 let cartesSelectionnees = new Set();
 let etatGlobal = null;
 let localHandOrder = []; // Stores card IDs in user-sorted order
@@ -256,8 +257,8 @@ socket.on('recevoirEmoji', (data) => {
     // Show floating emoji from the player's seat position
     const positions = {
         'adv-haut': { top: '10%', left: '50%' },
-        'adv-gauche': { top: '50%', left: '10%' },
-        'adv-droite': { top: '50%', right: '10%' },
+        'adv-gauche': { top: '32%', left: '10%' },
+        'adv-droite': { top: '32%', right: '10%' },
         'zone-main': { bottom: '20%', left: '50%' }
     };
     
@@ -824,7 +825,7 @@ let sortableHand = null;
 function rendreMain(mainCartes) {
     const conteneur = document.getElementById('conteneur-main');
     conteneur.innerHTML = '';
-    if (sortableHand) { sortableHand.destroy(); sortableHand = null; }
+    if (sortableHand) { try { sortableHand.destroy(); } catch(e) {} sortableHand = null; }
 
     if (!mainCartes || mainCartes.length === 0) return;
 
@@ -842,6 +843,14 @@ function rendreMain(mainCartes) {
         el.dataset.id = c.id;
         if (isWildcard) el.classList.add('wildcard-draggable');
         if (cartesSelectionnees.has(c.id)) el.classList.add('selectionnee');
+          if (cartesRecemmentPiochees.has(c.id)) {
+              el.classList.add('nouvelle-carte-piochee'); el.style.overflow = 'visible';
+              const badge = document.createElement('div');
+              badge.className = 'badge-nouvelle';
+              badge.style.cssText = 'position:absolute; top:-8px; right:-8px; background:red; color:white; font-size:10px; font-weight:bold; padding:2px 6px; border-radius:10px; border:2px solid white; box-shadow:0 2px 4px rgba(0,0,0,0.5); z-index:10;';
+              badge.innerHTML = 'Nouveau';
+              el.appendChild(badge);
+          }
         el.innerHTML = generateCardHTML(c);
         el.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -948,7 +957,6 @@ function rendreMelds(equipeData, conteneurId) {
         if (!equipeData.aOuvert) {
             rightSide += `<span style="font-size:9px; color:#f2c516; font-weight:800; background:rgba(242,197,22,0.15); padding:2px 4px; border-radius:5px; box-shadow:0 0 5px rgba(242,197,22,0.2);" title="Objectif d'ouverture">🎯${equipeData.seuilOuverture}</span>`;
         }
-        rightSide += `<span style="color:${color}; font-size:16px; font-weight:900; letter-spacing:-0.5px; text-shadow:0 0 10px ${color}50, 0 2px 4px rgba(0,0,0,0.6);">${equipeData.score}</span>`;
         rightSide += `</div>`;
         labelHTML += rightSide;
     }
@@ -1081,6 +1089,15 @@ function rendreMelds(equipeData, conteneurId) {
     ghost.className = 'meld-ghost';
     ghost.textContent = '+';
     conteneur.appendChild(ghost);
+    
+    if (equipeData) {
+        conteneur.style.position = 'relative';
+        const floatScore = document.createElement('div');
+        floatScore.className = 'meld-score-float';
+        floatScore.style = `position:absolute; bottom:8px; right:8px; color:${color}; font-size:18px; font-weight:900; text-shadow:0 0 12px ${color}50, 0 2px 6px rgba(0,0,0,0.8); pointer-events:none; z-index:20; background:rgba(0,0,0,0.4); padding:2px 8px; border-radius:8px; backdrop-filter:blur(4px);`;
+        floatScore.textContent = equipeData.score;
+        conteneur.appendChild(floatScore);
+    }
 }
 
 function rendreAdversaires(etat) {
@@ -1163,7 +1180,7 @@ function mettreAJourIndicateurTour() {
     
     // Ajouter la classe au joueur actif
     if (etatGlobal.tourActuel === monNumero) {
-        if (mainEl) mainEl.classList.add('tour-actif');
+        // Pas d'effet visuel sur la propre main selon la demande
     } else {
         const mapPos = {
             [(monNumero % 4) + 1]: 'gauche',
@@ -1501,10 +1518,11 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ANIMATIONS
-function animerCarte(sourceEl, destEl, classNameSupp) {
+function animerCarte(sourceEl, destEl, classNameSupp, innerHTML) {
     if (!sourceEl || !destEl) return;
     const tempCard = document.createElement('div');
     tempCard.className = 'animated-card-throw ' + (classNameSupp || '');
+    if (innerHTML) tempCard.innerHTML = innerHTML;
     document.body.appendChild(tempCard);
 
     const rectSource = sourceEl.getBoundingClientRect();
@@ -1565,4 +1583,76 @@ socket.on('animationJeter', (numeroJoueur) => {
     const terre = document.getElementById('terre');
     
     animerCarte(adv, terre, '');
+});
+
+// Settings & Quit
+const btnMenu = document.querySelector('.menu-btn');
+if(btnMenu) {
+    btnMenu.addEventListener('click', () => {
+        document.getElementById('modal-overlay').style.display = 'flex';
+        document.getElementById('modal-parametres').style.display = 'block';
+    });
+}
+const btnFermerParam = document.getElementById('btn-fermer-parametres');
+if(btnFermerParam) {
+    btnFermerParam.addEventListener('click', () => {
+        document.getElementById('modal-overlay').style.display = 'none';
+        document.getElementById('modal-parametres').style.display = 'none';
+    });
+}
+const btnQuitterJeu = document.getElementById('btn-quitter-jeu');
+if(btnQuitterJeu) {
+    btnQuitterJeu.addEventListener('click', () => {
+        socket.emit('quitterSalon');
+        window.location.reload();
+    });
+}
+
+
+socket.on('animationPiocher', (data) => {
+    if (data.joueur === monNumero && data.cartesRecues) {
+        cartesRecemmentPiochees.clear();
+        data.cartesRecues.forEach(c => cartesRecemmentPiochees.add(c.id));
+        setTimeout(() => {
+            cartesRecemmentPiochees.clear();
+            rendreMain(etatGlobal ? etatGlobal.maMain : []);
+        }, 3000);
+    }
+
+    let dest = null;
+    if (data.joueur === monNumero) {
+        dest = document.getElementById('conteneur-main');
+    } else {
+        const mapPos = {
+            [(monNumero % 4) + 1]: 'gauche',
+            [((monNumero + 1) % 4) + 1]: 'haut',
+            [((monNumero + 2) % 4) + 1]: 'droite'
+        };
+        const pos = mapPos[data.joueur];
+        if (pos) dest = document.getElementById('adv-' + pos);
+    }
+    
+    const source = document.getElementById('pioche');
+    if (source && dest) {
+        for(let i=0; i<data.nbCartes; i++) {
+            setTimeout(() => {
+                
+let innerHTML = null;
+let cls = 'mini-back';
+if (data.cartesRecues && data.cartesRecues[i]) {
+    const c = data.cartesRecues[i];
+    const isRed = (c.couleur === '♥' || c.couleur === '♦');
+    cls = 'card' + (isRed ? ' red' : '');
+    innerHTML = `<div class="idx tl"><span>${c.valeur}</span><span>${c.couleur}</span></div><div class="pip">${c.couleur}</div><div class="idx br"><span>${c.valeur}</span><span>${c.couleur}</span></div>`;
+}
+
+if (innerHTML) {
+    cls += ' animated-face';
+}
+animerCarte(source, dest, cls, innerHTML);
+
+
+            }, i * 200);
+        }
+    }
 });

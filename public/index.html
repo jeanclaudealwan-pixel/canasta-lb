@@ -13,16 +13,16 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/css/style.css?v=12">
+    <link rel="stylesheet" href="/css/style.css?v=13">
     <script src="/socket.io/socket.io.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
-    <link rel="stylesheet" href="/css/style-pro.css">
-    <script src="/js/jeu-client-pro.js?v=12" defer></script>
+    <link rel="stylesheet" href="/css/style-pro.css?v=1787324528561">
+    <script src="/js/jeu-client-pro.js?v=1787324528561" defer></script>
 </head>
 <body>
     <!-- SCREEN 1: LOBBY -->
     <div id="ecran-lobby">
-        <div class="lobby-conteneur">
+        <div class="lobby-conteneur modern-salon">
             <div class="lobby-header">
                 <h1>🃏 Canasta<br><span>Libanaise</span></h1>
                 <p class="lobby-sous-titre">Jeu de cartes multijoueur</p>
@@ -51,9 +51,10 @@
     </div>
     <!-- SCREEN 2: WAITING ROOM -->
     <div id="ecran-salon" style="display:none;">
-        <div class="salon-conteneur">
+        <div class="salon-conteneur modern-salon">
             <h2 id="titre-salon">Salon</h2>
-            <div id="grille-sieges" class="grille-sieges">
+            <div class="salon-layout-grid">
+                <div id="grille-sieges" class="grille-sieges">
                 <!-- 4 seat slots rendered by JS -->
             </div>
             
@@ -64,6 +65,7 @@
                     <input type="text" id="input-chat" placeholder="Message..." maxlength="100">
                     <button id="btn-envoyer-chat" class="btn btn-blue">Envoyer</button>
                 </div>
+            </div>
             </div>
             <div class="salon-actions">
                 <button id="btn-ajouter-bot" class="btn btn-blue">+ Ajouter Bot</button>
@@ -94,13 +96,16 @@
     <p>La table de Canasta est conçue pour le mode paysage — pivotez l'appareil pour jouer.</p>
   </div>
   <div class="table-wrap">
-    <!-- Compact Scoreboard (Top Left) -->
-    <div style="position:absolute; top:calc(8px + var(--safe-t)); right:calc(8px + var(--safe-r)); z-index:50; display:flex; flex-direction:column; gap:8px;">
-        <button class="menu-btn" style="position:static;"><svg class="icon"><use href="#i-menu"/></svg></button>
+    <!-- Left Top Buttons -->
+    <div style="position:absolute; top:calc(8px + var(--safe-t)); left:calc(8px + var(--safe-l)); z-index:50; display:flex; flex-direction:column; gap:8px;">
         <button id="btn-emoji" style="width:32px; height:32px; display:flex; align-items:center; justify-content:center; background:var(--panel-strong); border:1px solid var(--line); border-radius:9px; font-size:18px; cursor:pointer;" title="Envoyer Emoji">😀</button>
     </div>
+    <!-- Top Right Menu -->
+    <div style="position:absolute; top:calc(8px + var(--safe-t)); right:calc(8px + var(--safe-r)); z-index:50; display:flex; flex-direction:column; gap:8px;">
+        <button class="menu-btn" style="position:static;"><svg class="icon"><use href="#i-menu"/></svg></button>
+    </div>
     <!-- Emoji Panel -->
-    <div id="panneau-emojis" class="panneau-emojis" style="display:none; position:absolute; top:calc(85px + var(--safe-t)); right:calc(45px + var(--safe-r)); background:rgba(0,0,0,0.9); border:1px solid rgba(255,255,255,0.2); border-radius:8px; padding:10px; grid-template-columns:repeat(3,1fr); gap:10px; z-index:100; box-shadow:0 5px 15px rgba(0,0,0,0.5);">
+    <div id="panneau-emojis" class="panneau-emojis">
         <span class="emoji-option" style="font-size:24px; cursor:pointer; text-align:center;">😂</span>
         <span class="emoji-option" style="font-size:24px; cursor:pointer; text-align:center;">😡</span>
         <span class="emoji-option" style="font-size:24px; cursor:pointer; text-align:center;">👍</span>
@@ -254,6 +259,18 @@
             <div id="contenu-scores"></div>
             <button id="btn-fermer-scores" class="btn btn-green btn-large">Continuer ▶</button>
         </div>
+        
+        
+        
+        
+        <div id="modal-parametres" class="modal-panel" style="display:none; text-align: center;">
+            <h2 style="color: var(--gold); margin-bottom: 20px;">⚙️ Réglages</h2>
+            <div style="margin:20px 0;">
+                <p>Paramètres de la partie</p>
+            </div>
+            <button id="btn-quitter-jeu" class="btn btn-large" style="background: var(--red); color: white; border: 2px solid white; margin-bottom: 10px; font-weight: bold; border-radius: 12px;">🚪 Quitter la partie</button>
+            <button id="btn-fermer-parametres" class="btn btn-large" style="background: #333; color: white; border-radius: 12px; font-weight: bold;">Fermer</button>
+        </div>
         <div id="modal-sortie" class="modal-panel" style="display:none;">
             <h2>🚪 Demande de Sortie</h2>
             <p>Votre partenaire demande s'il peut sortir.</p>
@@ -271,6 +288,7 @@
     <div id="toast-container"></div>
 </body>
 </html>
+
 
 
 
