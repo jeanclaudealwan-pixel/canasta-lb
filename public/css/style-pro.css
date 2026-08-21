@@ -237,3 +237,17 @@
 .card.selectionnee { transform: translateY(-20px); box-shadow: 0 -5px 15px rgba(242,197,22,0.6); z-index: 10; position: relative; }
 
 .badge-terre { position:absolute; top:auto !important; bottom:-6px !important; right:-6px !important; background:var(--red); color:white; font-size:10px; font-weight:bold; padding:2px 6px; border-radius:10px; box-shadow:0 2px 4px rgba(0,0,0,0.5); z-index:10; }
+/* Nouvelles classes Pro */
+.joueur-actif .avatar {
+    box-shadow: 0 0 15px var(--gold);
+    border: 2px solid var(--gold);
+    transform: scale(1.1);
+    transition: all 0.3s ease;
+}
+
+.carte-animee {
+    position: fixed;
+    z-index: 9999;
+    transition: all 0.6s cubic-bezier(0.25, 0.8, 0.25, 1);
+    pointer-events: none;
+}

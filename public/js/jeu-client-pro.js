@@ -155,22 +155,43 @@ socket.on('miseAJourSalon', (donnees) => {
 
 function mettreAJourSieges(joueurs, hote) {
     const grille = document.getElementById('grille-sieges');
-    grille.innerHTML = '';
+    grille.innerHTML = `
+        <div style="display:flex; justify-content:space-between; gap:20px;">
+            <div style="flex:1; background:rgba(255,255,255,0.05); padding:10px; border-radius:10px; text-align:center;">
+                <h4 style="margin-bottom:10px; color:var(--blue);">ÉQUIPE NOUS</h4>
+                <div id="col-nous" style="display:flex; flex-direction:column; gap:10px;"></div>
+            </div>
+            <div style="flex:1; background:rgba(255,255,255,0.05); padding:10px; border-radius:10px; text-align:center;">
+                <h4 style="margin-bottom:10px; color:var(--red);">ÉQUIPE EUX</h4>
+                <div id="col-eux" style="display:flex; flex-direction:column; gap:10px;"></div>
+            </div>
+        </div>
+    `;
+    const colNous = grille.querySelector('#col-nous');
+    const colEux = grille.querySelector('#col-eux');
+    
     const mapJoueurs = {};
     joueurs.forEach(j => mapJoueurs[j.numero] = j);
 
     for (let i = 1; i <= 4; i++) {
         const div = document.createElement('div');
         div.className = 'siege';
+        const isNous = (i === 1 || i === 3);
         if (mapJoueurs[i]) {
+            const j = mapJoueurs[i];
             div.classList.add('occupe');
-            div.innerHTML = `<strong>Joueur ${i}</strong><br>${mapJoueurs[i].nom} ${mapJoueurs[i].estBot ? '🤖' : '👤'}`;
+            div.innerHTML = `<strong>Siège ${i}</strong><br>
+                <span style="font-size:24px;">${j.avatar || (j.estBot ? '🤖' : '👤')}</span><br>
+                ${j.nom}
+            `;
         } else {
             div.style.cursor = 'pointer';
-            div.innerHTML = `<strong>Joueur ${i}</strong><br><span style="color:#777">Cliquez pour s'asseoir</span>`;
+            div.innerHTML = `<strong>Siège ${i}</strong><br><span style="color:#777">Cliquez pour s'asseoir</span>`;
             div.addEventListener('click', () => socket.emit('choisirSiege', i));
         }
-        grille.appendChild(div);
+        
+        if (isNous) colNous.appendChild(div);
+        else colEux.appendChild(div);
     }
 
     const estHote = socket.id === hote;
@@ -1060,8 +1081,14 @@ function rendreAdversaires(etat) {
         if (!el) return;
         
         const nbCartes = etat.tailleMains[numJoueur] || 0;
-        const iconId = id === 'adv-haut' ? '#i-person' : '#i-bot';
-        const name = id === 'adv-haut' ? 'Partenaire' : (id === 'adv-gauche' ? 'Bot 1' : 'Bot 2');
+        let name = "Joueur " + numJoueur;
+        let avatarHTML = `<svg class="icon"><use href="#i-person"/></svg>`;
+        
+        if (etat.nomsJoueurs && etat.nomsJoueurs[numJoueur]) {
+            name = etat.nomsJoueurs[numJoueur].pseudo;
+            avatarHTML = `<span style="font-size:24px;">${etat.nomsJoueurs[numJoueur].avatar}</span>`;
+        }
+
         
         let handFanHTML = '';
         const limit = Math.min(nbCartes, 7);
@@ -1079,7 +1106,7 @@ function rendreAdversaires(etat) {
             ${handFanHTML}
           </div>
           <div class="avatar-wrap">
-            <div class="avatar"><svg class="icon"><use href="${iconId}"/></svg></div>
+            <div class="avatar" style="display:flex; justify-content:center; align-items:center;">${avatarHTML}</div>
             <span class="card-count">${nbCartes}</span>
           </div>
           <div class="avatar-name">${name}</div>
@@ -1148,9 +1175,15 @@ function mettreAJourIndicateurTour() {
         const partenaire = ((monNumero + 2 - 1) % 4) + 1;
         const gauche = (monNumero % 4) + 1;
         const droite = ((monNumero + 2) % 4) + 1;
-        mapNoms[partenaire] = "Partenaire";
-        mapNoms[gauche] = "Adv. Gauche";
-        mapNoms[droite] = "Adv. Droite";
+        if (etatGlobal.nomsJoueurs) {
+            mapNoms[partenaire] = etatGlobal.nomsJoueurs[partenaire]?.pseudo || "Partenaire";
+            mapNoms[gauche] = etatGlobal.nomsJoueurs[gauche]?.pseudo || "Adv. Gauche";
+            mapNoms[droite] = etatGlobal.nomsJoueurs[droite]?.pseudo || "Adv. Droite";
+        } else {
+            mapNoms[partenaire] = "Partenaire";
+            mapNoms[gauche] = "Adv. Gauche";
+            mapNoms[droite] = "Adv. Droite";
+        }
 
         indic.innerHTML = `<span class="turn-dot" style="background:rgba(255,255,255,0.4);box-shadow:none;"></span>Tour : ${mapNoms[etatGlobal.tourActuel] || 'Joueur ' + etatGlobal.tourActuel}`;
         indic.style.color = "#fff";
@@ -1333,12 +1366,64 @@ socket.on('resultatSortie', (data) => {
 // RECONNEXION ET ANTI-FREEZE MOBILE
 // =============================================================================
 socket.on('connect', () => {
-    const oldId = sessionStorage.getItem('canastaSocketId');
-    if (oldId && oldId !== socket.id) {
-        socket.emit('tentativeReconnexion', oldId);
+    let token = localStorage.getItem('canastaToken');
+    if (!token) {
+        token = 'tk_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        localStorage.setItem('canastaToken', token);
     }
-    sessionStorage.setItem('canastaSocketId', socket.id);
+    
+    let pseudo = document.getElementById('input-pseudo') ? document.getElementById('input-pseudo').value : 'Joueur';
+    if (!pseudo.trim()) pseudo = 'Joueur';
+    
+    localStorage.setItem('canastaPseudo', pseudo);
+    
+    socket.emit('setProfil', { pseudo, avatar: currentAvatar, token });
+    
+    const oldId = localStorage.getItem('canastaSessionId');
+    if (token) {
+        socket.emit('tentativeReconnexion', token);
+    }
+    localStorage.setItem('canastaSessionId', socket.id);
 });
+
+// Send updated profile when creating a room
+document.getElementById('btn-creer-salon').addEventListener('click', () => {
+    const pseudo = document.getElementById('input-pseudo').value.trim() || 'Joueur';
+    localStorage.setItem('canastaPseudo', pseudo);
+    const token = localStorage.getItem('canastaToken');
+    socket.emit('setProfil', { pseudo, avatar: currentAvatar, token });
+});
+
+// Update the disconnected events visually
+socket.on('joueurDeconnecte', (numero) => {
+    toast(`Joueur ${numero} est déconnecté (En attente...)`, 'warning');
+    // We could grey out the avatar here
+    const mapPos = {
+        [(monNumero % 4) + 1]: 'gauche',
+        [((monNumero + 1) % 4) + 1]: 'haut',
+        [((monNumero + 2) % 4) + 1]: 'droite'
+    };
+    const pos = mapPos[numero];
+    if (pos) {
+        const adv = document.getElementById('adv-' + pos);
+        if (adv) adv.style.opacity = '0.4';
+    }
+});
+
+socket.on('joueurReconnecte', (numero) => {
+    toast(`Joueur ${numero} s'est reconnecté !`, 'success');
+    const mapPos = {
+        [(monNumero % 4) + 1]: 'gauche',
+        [((monNumero + 1) % 4) + 1]: 'haut',
+        [((monNumero + 2) % 4) + 1]: 'droite'
+    };
+    const pos = mapPos[numero];
+    if (pos) {
+        const adv = document.getElementById('adv-' + pos);
+        if (adv) adv.style.opacity = '1';
+    }
+});
+
 
 document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
@@ -1350,3 +1435,69 @@ document.addEventListener('visibilitychange', () => {
     }
 });
 
+
+let currentAvatar = '👤';
+document.addEventListener('DOMContentLoaded', () => {
+    // Restore profile
+    const savedPseudo = localStorage.getItem('canastaPseudo');
+    if (savedPseudo) document.getElementById('input-pseudo').value = savedPseudo;
+    
+    const savedAvatar = localStorage.getItem('canastaAvatar');
+    if (savedAvatar) currentAvatar = savedAvatar;
+    
+    const options = document.querySelectorAll('.avatar-option');
+    options.forEach(opt => {
+        if (opt.dataset.avatar === currentAvatar) {
+            options.forEach(o => o.classList.remove('selected'));
+            opt.classList.add('selected');
+        }
+        opt.addEventListener('click', () => {
+            options.forEach(o => {
+                o.classList.remove('selected');
+                o.style.borderColor = 'transparent';
+                o.style.background = 'transparent';
+            });
+            opt.classList.add('selected');
+            opt.style.borderColor = 'var(--gold)';
+            opt.style.background = 'rgba(255,255,255,0.2)';
+            currentAvatar = opt.dataset.avatar;
+            localStorage.setItem('canastaAvatar', currentAvatar);
+        });
+    });
+});
+
+// ANIMATIONS
+socket.on('animationDescendre', (numeroJoueur) => {
+    if (numeroJoueur === monNumero) return; // on ne s'anime pas soi-même (déjà vu)
+    
+    const mapPos = {
+        [(monNumero % 4) + 1]: 'gauche',
+        [((monNumero + 1) % 4) + 1]: 'haut',
+        [((monNumero + 2) % 4) + 1]: 'droite'
+    };
+    const pos = mapPos[numeroJoueur];
+    if (!pos) return;
+    
+    const adv = document.getElementById('adv-' + pos);
+    const estEux = (numeroJoueur % 2 !== monNumero % 2);
+    const dest = document.getElementById(estEux ? 'melds-adversaire' : 'melds-equipe');
+    
+    animerCarte(adv, dest, '');
+});
+
+socket.on('animationJeter', (numeroJoueur) => {
+    if (numeroJoueur === monNumero) return;
+    
+    const mapPos = {
+        [(monNumero % 4) + 1]: 'gauche',
+        [((monNumero + 1) % 4) + 1]: 'haut',
+        [((monNumero + 2) % 4) + 1]: 'droite'
+    };
+    const pos = mapPos[numeroJoueur];
+    if (!pos) return;
+    
+    const adv = document.getElementById('adv-' + pos);
+    const terre = document.getElementById('terre');
+    
+    animerCarte(adv, terre, '');
+});

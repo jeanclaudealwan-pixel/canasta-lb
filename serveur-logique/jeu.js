@@ -76,10 +76,10 @@ class PartieCanasta {
         this.dernierRecapManche = null;
     }
 
-    demarrerNouvellePartie() {
+    demarrerNouvellePartie(premierJoueur = 1) {
         this.reinitialiserPartieComplete();
         this.enJeu = true;
-        this.demarrerNouvelleManche(1);
+        this.demarrerNouvelleManche(premierJoueur);
     }
 
     // Redémarre une manche : nouveau paquet, nouvelle distribution, tables vides.

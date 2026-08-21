@@ -20,7 +20,9 @@ app.get('/favicon.ico', (req, res) => res.status(204).end());
 let salons = {}; // Map of roomId -> room object
 let prochainSalonId = 1;
 let joueursDansSalons = {}; // { socketId: roomId }
-let deconnexionsPendantPartie = {}; // { token: { roomId, numero, timeout } }
+let deconnexionsPendantPartie = {};
+let profilsJoueurs = {};
+let tokenToSocket = {};
 
 function getSalonPourSocket(socketId) {
     const salonId = joueursDansSalons[socketId];
@@ -177,7 +179,8 @@ function gererFinManche(salon, resultat) {
         // Redémarrer automatiquement dans 10 secondes
         setTimeout(() => {
             if (salon && salon.partie && !salon.partie.enJeu) {
-                salon.partie.demarrerNouvelleManche(salon.partie.prochainPremierJoueur);
+                salon.indexDonneur = (salon.indexDonneur % 4) + 1;
+                salon.partie.demarrerNouvelleManche(salon.indexDonneur);
                 diffuserChangementTour(salon, salon.partie.tourActuel);
                 verifierTourBot(salon, salon.partie.tourActuel);
                 diffuserEtatGlobal(salon);
@@ -237,7 +240,7 @@ function envoyerMiseAJourSalon(salon) {
     for (let sId in salon.joueurs) {
         joueursArray.push({
             numero: salon.joueurs[sId],
-            nom: sId.startsWith('bot-') ? 'Bot' : 'Joueur',
+            nom: sId.startsWith('bot-') ? 'Bot' : (profilsJoueurs[sId] ? profilsJoueurs[sId].pseudo : 'Joueur'), avatar: profilsJoueurs[sId] ? profilsJoueurs[sId].avatar : '👤',
             estBot: sId.startsWith('bot-')
         });
     }
@@ -265,6 +268,8 @@ function quitterLeSalon(socketId) {
         let numeroLibere = salon.joueurs[socketId];
         
         if (salon.enCours) {
+            diffuserAlerte(salon, `Joueur ${numeroLibere} est déconnecté (En attente...)`);
+            io.to(salon.id).emit('joueurDeconnecte', numeroLibere);
             deconnexionsPendantPartie[socketId] = {
                 roomId: salon.id,
                 numero: numeroLibere,
@@ -306,6 +311,8 @@ io.on('connection', (socket) => {
     
     socket.emit('listeSalons', getListeSalonsData());
 
+    socket.on('setProfil', (profil) => { profilsJoueurs[socket.id] = profil;
+        if (profil.token) tokenToSocket[profil.token] = socket.id; });
     socket.on('listerSalons', () => {
         socket.emit('listeSalons', getListeSalonsData());
     });
@@ -341,7 +348,7 @@ io.on('connection', (socket) => {
         socket.emit('salonCree', {
             id: salonId,
             nom: nom,
-            joueurs: [{ numero: numeroJoueur, nom: 'Joueur', estBot: false }],
+            joueurs: [{ numero: numeroJoueur, nom: profilsJoueurs[socket.id] ? profilsJoueurs[socket.id].pseudo : 'Joueur', avatar: profilsJoueurs[socket.id] ? profilsJoueurs[socket.id].avatar : '👤', estBot: false }],
             hote: socket.id
         });
         socket.emit('attributionSiege', numeroJoueur);
@@ -369,7 +376,7 @@ io.on('connection', (socket) => {
                 id: salon.id,
                 nom: salon.nom,
                 joueurs: Object.keys(salon.joueurs).map(sId => ({
-                    numero: salon.joueurs[sId], nom: sId.startsWith('bot-') ? 'Bot' : 'Joueur', estBot: sId.startsWith('bot-')
+                    numero: salon.joueurs[sId], nom: sId.startsWith('bot-') ? 'Bot' : (profilsJoueurs[sId] ? profilsJoueurs[sId].pseudo : 'Joueur'), avatar: profilsJoueurs[sId] ? profilsJoueurs[sId].avatar : '👤', estBot: sId.startsWith('bot-')
                 })),
                 hote: salon.hote,
                 monNumero: numeroJoueur
@@ -384,7 +391,7 @@ io.on('connection', (socket) => {
                 id: salon.id,
                 nom: salon.nom,
                 joueurs: Object.keys(salon.joueurs).map(sId => ({
-                    numero: salon.joueurs[sId], nom: sId.startsWith('bot-') ? 'Bot' : 'Joueur', estBot: sId.startsWith('bot-')
+                    numero: salon.joueurs[sId], nom: sId.startsWith('bot-') ? 'Bot' : (profilsJoueurs[sId] ? profilsJoueurs[sId].pseudo : 'Joueur'), avatar: profilsJoueurs[sId] ? profilsJoueurs[sId].avatar : '👤', estBot: sId.startsWith('bot-')
                 })),
                 hote: salon.hote,
                 monNumero: null
@@ -459,7 +466,8 @@ io.on('connection', (socket) => {
         }
 
         diffuserAlerte(salon, "La table est complète ! Distribution des cartes...");
-        salon.partie.demarrerNouvellePartie();
+        salon.indexDonneur = salon.joueurs[salon.hote] || 1;
+        salon.partie.demarrerNouvellePartie(salon.indexDonneur);
         diffuserEtatGlobal(salon);
         diffuserChangementTour(salon, salon.partie.tourActuel);
         verifierTourBot(salon, salon.partie.tourActuel);
@@ -633,6 +641,8 @@ io.on('connection', (socket) => {
     });
 
     socket.on('tentativeReconnexion', (token) => {
+        let oldId = tokenToSocket[token] || token;
+        token = oldId; // proceed with old socket.id equivalent
         if (deconnexionsPendantPartie[token]) {
             let data = deconnexionsPendantPartie[token];
             clearTimeout(data.timeout);
