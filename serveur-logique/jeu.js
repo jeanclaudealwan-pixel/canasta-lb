@@ -40,7 +40,7 @@ class Carte {
 // on ne cache jamais rien d'autre que "combien de cartes" pour les mains
 // adverses, mais on garde la fonction pour un usage futur / clarté).
 function serialiserCarte(carte) {
-    return { id: carte.id, couleur: carte.couleur, valeur: carte.valeur, points: carte.points };
+    return { id: carte.id, couleur: carte.couleur, valeur: carte.valeur, points: carte.points, posePar: carte.posePar || null };
 }
 
 class PartieCanasta {
@@ -544,6 +544,7 @@ class PartieCanasta {
         for (const g of groupesValides) {
             if (g.type === 'nouvelle') {
                 for (const carte of g.cartes) {
+                    carte.posePar = numJoueur;
                     const idx = joueur.main.findIndex(c => c.id === carte.id);
                     if (idx !== -1) joueur.main.splice(idx, 1);
                 }
@@ -555,6 +556,7 @@ class PartieCanasta {
                 };
             } else if (g.type === 'ajout') {
                 for (const carte of g.cartesAjoutees) {
+                    carte.posePar = numJoueur;
                     const idx = joueur.main.findIndex(c => c.id === carte.id);
                     if (idx !== -1) joueur.main.splice(idx, 1);
                 }
@@ -601,6 +603,8 @@ class PartieCanasta {
 
         joueur.main.splice(idx, 1);
         this.defausse.push(carte);
+        if (!this.dernieresCartesJetees) this.dernieresCartesJetees = {};
+        this.dernieresCartesJetees[numJoueur] = carte.valeur;
 
         this.aJoueCeTour = false;
 

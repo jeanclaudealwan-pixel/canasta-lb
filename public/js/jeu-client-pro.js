@@ -157,14 +157,14 @@ socket.on('miseAJourSalon', (donnees) => {
 function mettreAJourSieges(joueurs, hote) {
     const grille = document.getElementById('grille-sieges');
     grille.innerHTML = `
-        <div style="display:flex; justify-content:space-between; gap:20px;">
-            <div style="flex:1; background:rgba(255,255,255,0.05); padding:10px; border-radius:10px; text-align:center;">
-                <h4 style="margin-bottom:10px; color:var(--blue);">ÉQUIPE NOUS</h4>
-                <div id="col-nous" style="display:flex; flex-direction:column; gap:10px;"></div>
+        <div style="display:flex; justify-content:space-between; gap:10px; height: 100%;">
+            <div style="flex:1; background:rgba(255,255,255,0.05); padding:8px; border-radius:10px; text-align:center; display:flex; flex-direction:column;">
+                <h4 style="margin-bottom:6px; font-size:13px; font-weight:800; color:var(--blue);">ÉQUIPE NOUS</h4>
+                <div id="col-nous" style="display:flex; flex-direction:column; gap:6px; flex:1; justify-content:center;"></div>
             </div>
-            <div style="flex:1; background:rgba(255,255,255,0.05); padding:10px; border-radius:10px; text-align:center;">
-                <h4 style="margin-bottom:10px; color:var(--red);">ÉQUIPE EUX</h4>
-                <div id="col-eux" style="display:flex; flex-direction:column; gap:10px;"></div>
+            <div style="flex:1; background:rgba(255,255,255,0.05); padding:8px; border-radius:10px; text-align:center; display:flex; flex-direction:column;">
+                <h4 style="margin-bottom:6px; font-size:13px; font-weight:800; color:var(--red);">ÉQUIPE EUX</h4>
+                <div id="col-eux" style="display:flex; flex-direction:column; gap:6px; flex:1; justify-content:center;"></div>
             </div>
         </div>
     `;
@@ -181,13 +181,13 @@ function mettreAJourSieges(joueurs, hote) {
         if (mapJoueurs[i]) {
             const j = mapJoueurs[i];
             div.classList.add('occupe');
-            div.innerHTML = `<strong>Siège ${i}</strong><br>
-                <span style="font-size:24px;">${j.avatar || (j.estBot ? '🤖' : '👤')}</span><br>
-                ${j.nom}
+            div.innerHTML = `<strong>Siège ${i}</strong>
+                <span style="font-size:20px; line-height:1; margin:2px 0;">${j.avatar || (j.estBot ? '🤖' : '👤')}</span>
+                <span style="font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; width:100%; display:block;">${j.nom}</span>
             `;
         } else {
             div.style.cursor = 'pointer';
-            div.innerHTML = `<strong>Siège ${i}</strong><br><span style="color:#777">Cliquez pour s'asseoir</span>`;
+            div.innerHTML = `<strong>Siège ${i}</strong><span style="color:#777; font-size:10px; margin-top:2px;">S'asseoir</span>`;
             div.addEventListener('click', () => socket.emit('choisirSiege', i));
         }
         
@@ -196,6 +196,7 @@ function mettreAJourSieges(joueurs, hote) {
     }
 
     const estHote = socket.id === hote;
+    window.idHoteActuel = hote;
     document.getElementById('btn-demarrer').style.display = estHote ? 'block' : 'none';
     document.getElementById('btn-ajouter-bot').style.display = estHote ? 'block' : 'none';
 }
@@ -304,34 +305,46 @@ document.getElementById('btn-sortir').addEventListener('click', () => {
 function autoGroupCartes(ids, extraCard = null) {
     let selected = ids.map(id => etatGlobal.maMain.find(c => c.id === id)).filter(Boolean);
     if (extraCard) selected.push(extraCard);
-    let byValue = {};
-    let wildcards = [];
     
-    selected.forEach(c => {
-        if (c.valeur === 'Joker' || c.valeur === '2') wildcards.push(c);
-        else {
-            if (!byValue[c.valeur]) byValue[c.valeur] = [];
-            byValue[c.valeur].push(c);
-        }
-    });
-
     let groups = [];
-    Object.keys(byValue).forEach(v => {
-        groups.push({ valeur: v, cartesId: byValue[v].map(c => c.id) });
-    });
+    let groupMap = {}; 
+    let lastModifiedGroup = null;
+    let orphanWildcards = [];
 
-    for (let w of wildcards) {
-        let added = false;
-        for (let g of groups) {
-            if (g.cartesId.length < 3) { g.cartesId.push(w.id); added = true; break; }
-        }
-        if (!added && groups.length > 0) {
-            groups[0].cartesId.push(w.id);
-        } else if (!added) {
-            groups.push({ valeur: '2', cartesId: [w.id] });
+    for (let c of selected) {
+        if (c.valeur === 'Joker' || c.valeur === '2') {
+            if (lastModifiedGroup) {
+                lastModifiedGroup.cartesId.push(c.id);
+            } else {
+                orphanWildcards.push(c);
+            }
+        } else {
+            if (!groupMap[c.valeur]) {
+                let newGroup = { valeur: c.valeur, cartesId: [] };
+                groups.push(newGroup);
+                groupMap[c.valeur] = newGroup;
+            }
+            groupMap[c.valeur].cartesId.push(c.id);
+            lastModifiedGroup = groupMap[c.valeur];
+            
+            // Absorb any orphan wildcards clicked before this natural card
+            if (orphanWildcards.length > 0) {
+                orphanWildcards.forEach(w => lastModifiedGroup.cartesId.push(w.id));
+                orphanWildcards = [];
+            }
         }
     }
-
+    
+    // If there are still orphan wildcards at the end
+    if (orphanWildcards.length > 0) {
+        if (groups.length > 0) {
+            orphanWildcards.forEach(w => groups[0].cartesId.push(w.id));
+        } else {
+            let wildGroup = { valeur: '2', cartesId: orphanWildcards.map(w => w.id) };
+            groups.push(wildGroup);
+        }
+    }
+    
     return groups;
 }
 
@@ -675,7 +688,47 @@ function generateCardHTML(carte) {
     `;
 }
 
+function colorSelectedGroups() {
+    // Reset all selection colors
+    document.querySelectorAll('.card').forEach(el => {
+        el.classList.remove('sel-group-1', 'sel-group-2', 'sel-group-3', 'sel-group-4', 'sel-group-5');
+    });
+
+    if (cartesSelectionnees.size > 0) {
+        const arrayIds = Array.from(cartesSelectionnees);
+        const groups = autoGroupCartes(arrayIds);
+        
+        groups.forEach((g, index) => {
+            const colorClass = `sel-group-${(index % 5) + 1}`;
+            g.cartesId.forEach(id => {
+                const el = document.querySelector(`.card[data-id="${id}"]`);
+                if (el) el.classList.add(colorClass);
+            });
+        });
+    }
+}
+
+function highlightCompatibleMelds() {
+    document.querySelectorAll('.canasta').forEach(el => el.classList.remove('compatible'));
+    const ghost = document.querySelector('#melds-equipe .meld-ghost');
+    if (ghost) ghost.classList.remove('compatible');
+
+    if (cartesSelectionnees.size > 0 && typeof evaluerSelection === 'function') {
+        const evaluation = evaluerSelection();
+        if (evaluation.valide) {
+            if (evaluation.type === 'ajout' && evaluation.cleUnique) {
+                const targetMeld = document.querySelector(`#melds-equipe .canasta[data-cle="${evaluation.cleUnique}"]`);
+                if (targetMeld) targetMeld.classList.add('compatible');
+            } else if (evaluation.type === 'nouveau' && ghost) {
+                ghost.classList.add('compatible');
+            }
+        }
+    }
+}
+
 function mettreAJourBoutons() {
+    highlightCompatibleMelds();
+    colorSelectedGroups();
     const estMonTour = etatGlobal && etatGlobal.tourActuel === monNumero;
     const btnPoser = document.getElementById('btn-poser');
     const btnSortir = document.getElementById('btn-sortir');
@@ -717,22 +770,27 @@ function mettreAJourBoutons() {
     } else {
         mettreAJourIndicateurTour();
         
+        let isSelectionValid = false;
+        if (typeof evaluerSelection === 'function') {
+            isSelectionValid = evaluerSelection().valide;
+        }
+
         if (cartesSelectionnees.size === 1 && estMonTour && etatGlobal.aJoueCeTour) {
-            if (btnPoser) btnPoser.style.display = 'none';
             if (btnJeter) btnJeter.style.display = 'flex';
         } else {
             if (btnJeter) btnJeter.style.display = 'none';
-            if (btnPoser) {
-                btnPoser.style.display = 'flex';
-                if (estMonTour && typeof evaluerSelection === 'function' && evaluerSelection().valide) {
-                    btnPoser.disabled = false;
-                    btnPoser.style.transform = 'scale(1.1)';
-                    btnPoser.style.opacity = '1';
-                } else {
-                    btnPoser.disabled = true;
-                    btnPoser.style.transform = 'scale(1)';
-                    btnPoser.style.opacity = '0.5';
-                }
+        }
+
+        if (btnPoser) {
+            btnPoser.style.display = 'flex';
+            if (estMonTour && isSelectionValid) {
+                btnPoser.disabled = false;
+                btnPoser.style.transform = 'scale(1.1)';
+                btnPoser.style.opacity = '1';
+            } else {
+                btnPoser.disabled = true;
+                btnPoser.style.transform = 'scale(1)';
+                btnPoser.style.opacity = '0.5';
             }
         }
         if (btnValider) btnValider.style.display = 'none';
@@ -843,15 +901,15 @@ function rendreMain(mainCartes) {
         el.dataset.id = c.id;
         if (isWildcard) el.classList.add('wildcard-draggable');
         if (cartesSelectionnees.has(c.id)) el.classList.add('selectionnee');
-          if (cartesRecemmentPiochees.has(c.id)) {
-              el.classList.add('nouvelle-carte-piochee'); el.style.overflow = 'visible';
-              const badge = document.createElement('div');
-              badge.className = 'badge-nouvelle';
-              badge.style.cssText = 'position:absolute; top:-8px; right:-8px; background:red; color:white; font-size:10px; font-weight:bold; padding:2px 6px; border-radius:10px; border:2px solid white; box-shadow:0 2px 4px rgba(0,0,0,0.5); z-index:10;';
-              badge.innerHTML = 'Nouveau';
-              el.appendChild(badge);
-          }
         el.innerHTML = generateCardHTML(c);
+        if (cartesRecemmentPiochees.has(c.id)) {
+            el.classList.add('nouvelle-carte-piochee');
+            el.style.overflow = 'visible';
+            const dot = document.createElement('div');
+            dot.className = 'badge-nouvelle';
+            dot.textContent = '✨';
+            el.appendChild(dot);
+        }
         el.addEventListener('click', (e) => {
             e.stopPropagation();
             onCarteTap(c, el);
@@ -963,63 +1021,101 @@ function rendreMelds(equipeData, conteneurId) {
     
     conteneur.innerHTML = `<div class="meld-label">${labelHTML}</div>`;
     
-    if (!equipeData) return;
-
-    if (equipeData.troisRouges && equipeData.troisRouges.length > 0) {
-        const bonus = document.createElement('span');
-        bonus.className = 'bonus-chip';
-        bonus.style.display = 'inline-block';
-        bonus.style.marginLeft = '8px';
-        bonus.style.padding = '2px 5px';
-        bonus.style.fontSize = '8px';
-        bonus.textContent = `♦ 3 rouge × ${equipeData.troisRouges.length}`;
-        const labelLeft = conteneur.querySelector('.label-left');
-        if (labelLeft) labelLeft.appendChild(bonus);
-    }
-
-    const valeursTriees = Object.keys(equipeData.table).sort((a,b) => a - b);
-    valeursTriees.forEach(val => {
-        const combi = equipeData.table[val];
-        const canastaDiv = document.createElement('div');
-        
-        // Déterminer la classe de la canasta
-        let typeCanasta = 'open';
-        let isPure = false;
-        if (combi.cartes.length >= 7) {
-            isPure = !combi.cartes.some(c => c.valeur === 'Joker' || c.valeur === '2');
-            typeCanasta = 'closed ' + (isPure ? 'pure' : 'mixed');
+    // Wrap in canasta-list
+    const canastaListDiv = document.createElement('div');
+    canastaListDiv.className = 'canasta-list';
+    
+    if (equipeData) {
+        if (equipeData.troisRouges && equipeData.troisRouges.length > 0) {
+            const bonus = document.createElement('span');
+            bonus.className = 'bonus-chip';
+            bonus.style.display = 'inline-block';
+            bonus.style.marginLeft = '8px';
+            bonus.style.padding = '2px 5px';
+            bonus.style.fontSize = '8px';
+            bonus.textContent = `♦ 3 rouge × ${equipeData.troisRouges.length}`;
+            const labelLeft = conteneur.querySelector('.label-left');
+            if (labelLeft) labelLeft.appendChild(bonus);
         }
-        
-        canastaDiv.className = `canasta ${typeCanasta}`;
-        
-        const slotsDiv = document.createElement('div');
-        slotsDiv.className = 'slots';
-        
-        if (combi.cartes.length >= 7) {
-            const slot = document.createElement('div');
-            const c = combi.cartes.find(x => x.valeur !== 'Joker' && x.valeur !== '2') || combi.cartes[0];
-            const color = (c.couleur === 'Coeur' || c.couleur === 'Carreau') ? ' red' : '';
-            const valDisplay = (c.valeur === 'Joker' || c.valeur === '2') ? '★' : (c.valeur === '10' ? '10' : c.valeur[0]);
-            slot.className = `slot filled${color}`;
-            slot.textContent = valDisplay;
-            slot.style.width = '30px';
-            slot.style.boxShadow = '2px 2px 5px rgba(0,0,0,0.5)';
-            slotsDiv.appendChild(slot);
-        } else {
-            for (let i = 0; i < 7; i++) {
-                const slot = document.createElement('div');
-                if (i < combi.cartes.length) {
-                    const c = combi.cartes[i];
-                    const color = (c.couleur === 'Coeur' || c.couleur === 'Carreau') ? ' red' : '';
-                    const valDisplay = (c.valeur === 'Joker' || c.valeur === '2') ? '★' : (c.valeur === '10' ? '10' : c.valeur[0]);
-                    slot.className = `slot filled${color}`;
-                    slot.textContent = valDisplay;
-                } else {
-                    slot.className = 'slot';
-                }
-                slotsDiv.appendChild(slot);
+
+        const valeursTriees = Object.keys(equipeData.table).sort((a,b) => a - b);
+        valeursTriees.forEach(val => {
+            const combi = equipeData.table[val];
+            const canastaDiv = document.createElement('div');
+            
+            // Déterminer la classe de la canasta
+            let typeCanasta = 'open';
+            let isPure = false;
+            if (combi.cartes.length >= 7) {
+                isPure = !combi.cartes.some(c => c.valeur === 'Joker' || c.valeur === '2');
+                typeCanasta = 'closed ' + (isPure ? 'pure' : 'mixed');
             }
-        }
+            let isHighlight = false;
+            canastaDiv.className = `canasta ${typeCanasta}`;
+            canastaDiv.dataset.cle = val; // Store the unique key for highlighting
+            
+            const slotsDiv = document.createElement('div');
+            slotsDiv.className = 'slots';
+            
+            if (combi.cartes.length >= 7) {
+                const slot = document.createElement('div');
+                let c;
+                if (isPure) {
+                    c = combi.cartes.find(x => x.valeur !== 'Joker' && x.valeur !== '2' && (x.couleur === 'Coeur' || x.couleur === 'Carreau'));
+                } else {
+                    c = combi.cartes.find(x => x.valeur !== 'Joker' && x.valeur !== '2' && (x.couleur === 'Pique' || x.couleur === 'Trefle'));
+                }
+                if (!c) c = combi.cartes.find(x => x.valeur !== 'Joker' && x.valeur !== '2') || combi.cartes[0];
+                const color = (c.couleur === 'Coeur' || c.couleur === 'Carreau') ? ' red' : '';
+                const valDisplay = (c.valeur === 'Joker' || c.valeur === '2') ? '★' : (c.valeur === '10' ? '10' : c.valeur[0]);
+                let isCardHighlight = window.cartesSurlignees && combi.cartes.some(cc => window.cartesSurlignees.includes(cc.id));
+                slot.className = `slot filled${color}` + (isCardHighlight ? ' highlight-card-glow' : '');
+                
+                if (isCardHighlight) {
+                    const hCard = combi.cartes.find(cc => window.cartesSurlignees.includes(cc.id));
+                    if (hCard && hCard.posePar && etatGlobal && etatGlobal.couleursJoueurs) {
+                        const pColor = etatGlobal.couleursJoueurs[hCard.posePar] || '#f2c516';
+                        slot.style.setProperty('--glow-color', pColor);
+                        slot.style.backgroundColor = pColor + '40';
+                    }
+                }
+                
+                slot.textContent = valDisplay;
+                slot.style.width = '30px';
+                slot.style.boxShadow = '2px 2px 5px rgba(0,0,0,0.5)';
+                slotsDiv.appendChild(slot);
+            } else {
+                for (let i = 0; i < 7; i++) {
+                    const slot = document.createElement('div');
+                    if (i < combi.cartes.length) {
+                        const c = combi.cartes[i];
+                        const color = (c.couleur === 'Coeur' || c.couleur === 'Carreau') ? ' red' : '';
+                        const valDisplay = (c.valeur === 'Joker' || c.valeur === '2') ? '★' : (c.valeur === '10' ? '10' : c.valeur[0]);
+                        let isCardHighlight = window.cartesSurlignees && window.cartesSurlignees.includes(c.id);
+                        slot.className = `slot filled${color}` + (isCardHighlight ? ' highlight-card-glow' : '');
+                        
+                        if (isCardHighlight && c.posePar && etatGlobal && etatGlobal.couleursJoueurs) {
+                            const pColor = etatGlobal.couleursJoueurs[c.posePar] || '#f2c516';
+                            slot.style.setProperty('--glow-color', pColor);
+                            slot.style.backgroundColor = pColor + '40';
+                        }
+                        
+                        slot.textContent = valDisplay;
+                        if (c.posePar && etatGlobal && etatGlobal.couleursJoueurs) {
+                            const dot = document.createElement('span');
+                            dot.className = 'player-dot';
+                            dot.style.backgroundColor = etatGlobal.couleursJoueurs[c.posePar] || '#fff';
+                            slot.style.position = 'relative';
+                            slot.textContent = '';
+                            slot.appendChild(document.createTextNode(valDisplay));
+                            slot.appendChild(dot);
+                        }
+                    } else {
+                        slot.className = 'slot';
+                    }
+                    slotsDiv.appendChild(slot);
+                }
+            }
         canastaDiv.appendChild(slotsDiv);
         
         // Afficher le tag
@@ -1047,14 +1143,14 @@ function rendreMelds(equipeData, conteneurId) {
             }
         });
         
-        conteneur.appendChild(canastaDiv);
+        canastaListDiv.appendChild(canastaDiv);
     });
+
     // Ajouter la zone de préparation à la suite
     if (conteneurId === 'melds-equipe' && typeof groupesPrepares !== 'undefined' && groupesPrepares.length > 0) {
         groupesPrepares.forEach(g => {
             const canastaDiv = document.createElement('div');
             canastaDiv.className = 'canasta open staged';
-            canastaDiv.style.border = '1px dashed #fff';
             
             const slotsDiv = document.createElement('div');
             slotsDiv.className = 'slots';
@@ -1070,25 +1166,36 @@ function rendreMelds(equipeData, conteneurId) {
             // fill remaining up to 7
             for(let i=g.cartes.length; i<7; i++) {
                 const slot = document.createElement('div');
-                slot.className = 'slot';
+                slot.className = 'slot empty';
                 slotsDiv.appendChild(slot);
             }
             canastaDiv.appendChild(slotsDiv);
             
             const tag = document.createElement('span');
             tag.className = 'canasta-tag open';
-            tag.textContent = 'Pose';
+            tag.textContent = 'Poser';
             canastaDiv.appendChild(tag);
             
-            conteneur.appendChild(canastaDiv);
+            canastaListDiv.appendChild(canastaDiv);
         });
     }
+    } // End if (equipeData)
 
-    // Plus ghost
+    // Plus ghost (nouveau meld)
     const ghost = document.createElement('div');
     ghost.className = 'meld-ghost';
     ghost.textContent = '+';
-    conteneur.appendChild(ghost);
+    ghost.addEventListener('click', () => {
+        if (conteneurId === 'melds-equipe') {
+            const btnPoser = document.getElementById('btn-poser');
+            if (btnPoser && btnPoser.style.display !== 'none' && !btnPoser.disabled) {
+                btnPoser.click();
+            }
+        }
+    });
+    canastaListDiv.appendChild(ghost);
+    
+    conteneur.appendChild(canastaListDiv);
     
     if (equipeData) {
         conteneur.style.position = 'relative';
@@ -1132,16 +1239,23 @@ function rendreAdversaires(etat) {
             }
         }
 
+        let couleurJoueur = '#fff';
+        if (etat.couleursJoueurs && etat.couleursJoueurs[numJoueur]) {
+            couleurJoueur = etat.couleursJoueurs[numJoueur];
+        }
+
         el.innerHTML = `
           <div class="hand-fan" ${id === 'adv-haut' ? `style="width:${(limit-1)*8 + 13}px;"` : `style="height:${(limit-1)*6 + 18}px;"`}>
             ${handFanHTML}
           </div>
           <div class="avatar-wrap">
-            <div class="avatar" style="display:flex; justify-content:center; align-items:center;">${avatarHTML}</div>
+            <div class="avatar" style="display:flex; justify-content:center; align-items:center; border: 2px solid ${couleurJoueur}; box-shadow: 0 0 8px ${couleurJoueur}80;">${avatarHTML}</div>
             <span class="card-count">${nbCartes}</span>
           </div>
-          <div class="avatar-name">${name}</div>
-          
+          <div class="avatar-name" style="display:flex; align-items:center; gap:4px; justify-content:center;">
+            <span style="width:8px; height:8px; border-radius:50%; background-color:${couleurJoueur}; display:inline-block; border:1px solid rgba(0,0,0,0.5);"></span>
+            ${name}
+          </div>
         `;
     }
 
@@ -1170,7 +1284,13 @@ function rendreScoresEtTour(etat) {
 function mettreAJourIndicateurTour() {
     if (!etatGlobal) return;
     const indic = document.getElementById('indicateur-tour');
-    if (!indic) return;
+    if (indic) {
+        let maCouleur = '#fff';
+        if (etatGlobal.couleursJoueurs && etatGlobal.monNumero && etatGlobal.couleursJoueurs[etatGlobal.monNumero]) {
+            maCouleur = etatGlobal.couleursJoueurs[etatGlobal.monNumero];
+        }
+        indic.innerHTML = `<span class="turn-dot" style="background-color:${maCouleur};"></span>Tour : Vous`;
+    }
 
     // --- MISE A JOUR DES STYLES DE TOUR ACTIF ---
     // Nettoyer les classes actives partout
@@ -1195,6 +1315,7 @@ function mettreAJourIndicateurTour() {
     }
     // --------------------------------------------
 
+    const indicScore = document.getElementById('indicateur-score-pose');
     if (groupesPrepares && groupesPrepares.length > 0) {
         let scorePose = 0;
         groupesPrepares.forEach(g => {
@@ -1205,16 +1326,18 @@ function mettreAJourIndicateurTour() {
         if (eq && !eq.aOuvert) targetScore = eq.seuilOuverture || 60;
         else targetScore = 0;
 
+        indicScore.style.display = 'flex';
         if (targetScore > 0) {
-            indic.textContent = `Score : ${scorePose} / ${targetScore}`;
-            indic.style.color = scorePose >= targetScore ? '#4ade80' : '#f87171';
-            indic.style.borderColor = scorePose >= targetScore ? '#4ade80' : '#f87171';
+            indicScore.textContent = `Score : ${scorePose} / ${targetScore}`;
+            indicScore.style.color = scorePose >= targetScore ? '#4ade80' : '#f87171';
+            indicScore.style.borderColor = scorePose >= targetScore ? '#4ade80' : '#f87171';
         } else {
-            indic.textContent = `Score : ${scorePose}`;
-            indic.style.color = '#fff';
-            indic.style.borderColor = "rgba(255,255,255,0.2)";
+            indicScore.textContent = `Score : ${scorePose}`;
+            indicScore.style.color = '#fff';
+            indicScore.style.borderColor = "rgba(255,255,255,0.2)";
         }
-        return;
+    } else {
+        indicScore.style.display = 'none';
     }
 
     if (etatGlobal.tourActuel === monNumero) {
@@ -1337,11 +1460,12 @@ function afficherRecap(recap) {
     document.getElementById('modal-overlay').style.display = 'flex';
     document.getElementById('modal-scores').style.display = 'block';
     
-    let html = '';
+    let html = '<div style="display:flex; flex-wrap:wrap; gap:20px; text-align:left;">';
     for (let eq of [1, 2]) {
         let d = recap.equipes[eq];
         if (!d) continue;
-        html += `<h3 style="color:${eq===etatGlobal.monEquipe?'#3498db':'#e74c3c'}">${eq===etatGlobal.monEquipe?'Notre Équipe':'Adversaires'}</h3>`;
+        html += `<div style="flex:1; min-width:250px; background:rgba(0,0,0,0.2); padding:15px; border-radius:10px;">`;
+        html += `<h3 style="color:${eq===etatGlobal.monEquipe?'#3498db':'#e74c3c'}; margin-top:0; text-align:center;">${eq===etatGlobal.monEquipe?'Notre Équipe':'Adversaires'}</h3>`;
         html += `<div class="ligne-score"><span>3 Rouges :</span><span>${d.detail.troisRouges}</span></div>`;
         let signPose = d.detail.pointsEnArriere ? '-' : '';
         html += `<div class="ligne-score"><span>Posé :</span><span style="color:${d.detail.pointsEnArriere?'indianred':'inherit'}">${signPose}${d.detail.valeurCombinaisons}</span></div>`;
@@ -1355,15 +1479,36 @@ function afficherRecap(recap) {
             html += `<div class="ligne-score" style="color:var(--gold)"><span>Sortie :</span><span>${d.detail.bonusSortie}</span></div>`;
         }
         html += `<div class="ligne-score" style="color:var(--red)"><span>Main restante :</span><span>-${d.detail.valeurMainRestante}</span></div>`;
-        html += `<div class="ligne-score"><span>TOTAL MANCHE :</span><span>${d.pointsManche}</span></div>`;
-        html += `<div class="ligne-score" style="color:var(--gold)"><span>SCORE GLOBAL :</span><span>${d.scoreTotal}</span></div>`;
+        html += `<div class="ligne-score" style="margin-top:10px;"><span>TOTAL MANCHE :</span><span>${d.pointsManche}</span></div>`;
+        html += `<div class="ligne-score" style="color:var(--gold); font-size:1.2em;"><span>SCORE GLOBAL :</span><span>${d.scoreTotal}</span></div>`;
+        html += `</div>`;
     }
+    html += '</div>';
+    const btn = document.getElementById('btn-fermer-scores');
+    // On vérifie d'abord window.idHoteActuel, ou bien on regarde dans etatGlobal si présent
+    const hoteActuel = window.idHoteActuel || (etatGlobal && etatGlobal.hote);
+    
+    if (hoteActuel === socket.id) {
+        btn.textContent = 'Continuer ▶';
+        btn.style.background = 'var(--green)';
+        btn.disabled = false;
+    } else {
+        btn.textContent = "Attente de l'hôte...";
+        btn.style.background = '#666';
+        btn.disabled = true;
+    }
+
     document.getElementById('contenu-scores').innerHTML = html;
 }
 
 document.getElementById('btn-fermer-scores').addEventListener('click', () => {
-    document.getElementById('modal-scores').style.display = 'none';
-    document.getElementById('modal-overlay').style.display = 'none';
+    const hoteActuel = window.idHoteActuel || (etatGlobal && etatGlobal.hote);
+    if (hoteActuel === socket.id) {
+        socket.emit('demandeNouvelleManche');
+        const btn = document.getElementById('btn-fermer-scores');
+        btn.textContent = "Démarrage...";
+        btn.disabled = true;
+    }
 });
 
 function afficherVictoire(vainqueur, equipes) {
@@ -1520,24 +1665,43 @@ document.addEventListener('DOMContentLoaded', () => {
 // ANIMATIONS
 function animerCarte(sourceEl, destEl, classNameSupp, innerHTML) {
     if (!sourceEl || !destEl) return;
+    
+    // Si source ou dest est un adversaire, cibler sa main (hand-fan) plutôt que tout le bloc
+    const realSource = sourceEl.querySelector('.hand-fan') || sourceEl;
+    const realDest = destEl.querySelector('.hand-fan') || destEl;
+
     const tempCard = document.createElement('div');
     tempCard.className = 'animated-card-throw ' + (classNameSupp || '');
     if (innerHTML) tempCard.innerHTML = innerHTML;
     document.body.appendChild(tempCard);
 
-    const rectSource = sourceEl.getBoundingClientRect();
-    const rectDest = destEl.getBoundingClientRect();
+    const rectSource = realSource.getBoundingClientRect();
+    const rectDest = realDest.getBoundingClientRect();
     
-    const startX = rectSource.left + rectSource.width / 2 - 13;
-    const startY = rectSource.top + rectSource.height / 2 - 18;
-    
-    tempCard.style.left = startX + 'px';
-    tempCard.style.top = startY + 'px';
-    
+    // Attendre que la carte soit rendue pour avoir ses dimensions réelles
     requestAnimationFrame(() => {
+        const cardRect = tempCard.getBoundingClientRect();
+        const cardW = cardRect.width || 26;
+        const cardH = cardRect.height || 36;
+        
+        const startX = rectSource.left + rectSource.width / 2 - cardW / 2;
+        const startY = rectSource.top + rectSource.height / 2 - cardH / 2;
+        
+        tempCard.style.left = startX + 'px';
+        tempCard.style.top = startY + 'px';
+        
+        // Setup transition pour avoir une belle courbe
+        tempCard.style.transition = 'all 0.5s cubic-bezier(0.25, 1, 0.5, 1)';
+        
         requestAnimationFrame(() => {
-            const endX = rectDest.left + rectDest.width / 2 - 13;
-            const endY = rectDest.top + rectDest.height / 2 - 18;
+            const endX = rectDest.left + rectDest.width / 2 - cardW / 2;
+            const endY = rectDest.top + rectDest.height / 2 - cardH / 2;
+            
+            // Calculer un léger décalage pour l'arc de cercle
+            const midX = (startX + endX) / 2;
+            const midY = (startY + endY) / 2;
+            const curveOffset = 50; // pixels
+            
             tempCard.style.left = endX + 'px';
             tempCard.style.top = endY + 'px';
             tempCard.style.transform = 'scale(1.2) rotate(360deg)';
@@ -1550,7 +1714,15 @@ function animerCarte(sourceEl, destEl, classNameSupp, innerHTML) {
     }, 500);
 }
 
-socket.on('animationDescendre', (numeroJoueur) => {
+window.cartesSurlignees = [];
+socket.on('animationDescendre', (data) => {
+    let numeroJoueur = data;
+    let cartesAjoutees = [];
+    if (typeof data === 'object') {
+        numeroJoueur = data.numeroJoueur;
+        cartesAjoutees = data.cartesAjoutees || [];
+    }
+
     if (numeroJoueur === monNumero) return; // on ne s'anime pas soi-même (déjà vu)
     
     const mapPos = {
@@ -1566,6 +1738,20 @@ socket.on('animationDescendre', (numeroJoueur) => {
     const dest = document.getElementById(estEux ? 'melds-adversaire' : 'melds-equipe');
     
     animerCarte(adv, dest, '');
+
+    // Set global highlight variable to be picked up by rendreMelds
+    if (cartesAjoutees.length > 0) {
+        window.cartesSurlignees = cartesAjoutees;
+        setTimeout(() => {
+            window.cartesSurlignees = [];
+            // Remove highlight classes manually after 2 seconds
+            document.querySelectorAll('.highlight-card-glow').forEach(el => {
+                el.classList.remove('highlight-card-glow');
+                el.style.backgroundColor = '';
+                el.style.removeProperty('--glow-color');
+            });
+        }, 2000);
+    }
 });
 
 socket.on('animationJeter', (numeroJoueur) => {
@@ -1641,13 +1827,11 @@ let innerHTML = null;
 let cls = 'mini-back';
 if (data.cartesRecues && data.cartesRecues[i]) {
     const c = data.cartesRecues[i];
-    const isRed = (c.couleur === '♥' || c.couleur === '♦');
-    cls = 'card' + (isRed ? ' red' : '');
-    innerHTML = `<div class="idx tl"><span>${c.valeur}</span><span>${c.couleur}</span></div><div class="pip">${c.couleur}</div><div class="idx br"><span>${c.valeur}</span><span>${c.couleur}</span></div>`;
-}
-
-if (innerHTML) {
-    cls += ' animated-face';
+    const suitMap = { 'Coeur': '♥', 'Carreau': '♦', 'Trefle': '♣', 'Pique': '♠' };
+    const suitSymbol = suitMap[c.couleur] || c.couleur;
+    const isRed = (c.couleur === 'Coeur' || c.couleur === 'Carreau');
+    cls = 'animated-card-throw animated-face' + (isRed ? ' red' : '');
+    innerHTML = `<div class="idx tl"><span>${c.valeur}</span><span>${suitSymbol}</span></div><div class="pip">${suitSymbol}</div><div class="idx br"><span>${c.valeur}</span><span>${suitSymbol}</span></div>`;
 }
 animerCarte(source, dest, cls, innerHTML);
 

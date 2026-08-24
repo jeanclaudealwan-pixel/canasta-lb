@@ -3,7 +3,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
 
-const { PartieCanasta } = require('./serveur-logique/jeu'); 
+const { PartieCanasta, calculerSeuilOuverture } = require('./serveur-logique/jeu'); 
 
 const app = express();
 const serveur = http.createServer(app);
@@ -31,106 +31,361 @@ class BotJoueur {
         this.partie = salon.partie;
         this.io = serverIo;
     }
-    jouerTour() {
-        setTimeout(() => {
-            if (!this.partie || !this.partie.enJeu) return;
-            
-            let ramasserOk = false;
-            const topTerre = this.partie.defausse.length > 0 ? this.partie.defausse[this.partie.defausse.length - 1] : null;
-            const equipe = this.partie.equipes[this.partie.equipeDuJoueur(this.numero)];
-            const main = this.partie.joueurs[this.numero].main;
+    async jouerTour() {
+        // Délai initial avant toute action (réflexion du bot)
+        await new Promise(r => setTimeout(r, 1200 + Math.random() * 800));
+        if (!this.partie || !this.partie.enJeu) return;
+        
+        const numero = this.numero;
+        const partie = this.partie;
+            let equipe = partie.equipes[partie.equipeDuJoueur(numero)];
+            let main = partie.joueurs[numero].main;
+            if (!equipe.aOuvert) {
+                this.toursSansOuverture = (this.toursSansOuverture || 0) + 1;
+            } else {
+                this.toursSansOuverture = 0;
+            }
 
-            if (topTerre && !topTerre.estJoker && topTerre.valeur !== '2' && !topTerre.est3Noir && equipe.aOuvert) {
-                const pileGelee = this.partie.defausse.some(c => c.estJoker || c.valeur === '2');
-                const requiredMatches = pileGelee ? 3 : 2;
-                const nbMatches = main.filter(c => c.valeur === topTerre.valeur).length;
-                if (nbMatches >= requiredMatches) {
-                    const resRamasser = this.partie.actionRamasserTerre(this.numero, null);
-                    if (resRamasser.ok) {
-                        ramasserOk = true;
-                        diffuserEtatGlobal(this.salon);
+            let ramasserOk = false;
+            const topTerre = partie.defausse.length > 0 ? partie.defausse[partie.defausse.length - 1] : null;
+            
+            // 1. RAMASSER LA TERRE
+            if (topTerre && !topTerre.estJoker && topTerre.valeur !== '2' && !topTerre.est3Noir) {
+                const pileGelee = partie.defausse.some(c => c.estJoker || c.valeur === '2');
+                const nbRequis = pileGelee ? 3 : 2;
+                const naturals = main.filter(c => !c.estJoker && c.valeur === topTerre.valeur);
+                
+                if (naturals.length >= nbRequis) {
+                    let wantsToPickUp = true;
+                    if (equipe.aOuvert) {
+                        // SCENARIO 3 : Ignorer les petites piles (<4) sauf si c'est très utile
+                        if (partie.defausse.length <= 3) {
+                            let meldLen = equipe.table[topTerre.valeur] ? equipe.table[topTerre.valeur].cartes.length : 0;
+                            // S'il a beaucoup de cartes et que ça ne fait pas une canasta directe, il l'ignore
+                            if (meldLen + naturals.length + 1 < 7 && main.length > 5) {
+                                wantsToPickUp = false;
+                            }
+                        }
+                        if (wantsToPickUp) {
+                            const res = partie.actionRamasserTerre(numero, null);
+                            if (res.ok) ramasserOk = true;
+                        }
+                    } else {
+                        // Tenter d'ouvrir avec la terre (approche pure privilégiée)
+                        let seuil = calculerSeuilOuverture(equipe.score);
+                        let autoriserJoker = (this.toursSansOuverture >= 3 || seuil >= 90);
+                        
+                        let pointsTotal = 0;
+                        const valMap = {};
+                        for (const c of main) {
+                            if (!c.estJoker && c.valeur !== '2' && !c.est3Noir && c.valeur !== '3 Rouge') {
+                                valMap[c.valeur] = valMap[c.valeur] || [];
+                                valMap[c.valeur].push(c);
+                            }
+                        }
+                        valMap[topTerre.valeur] = valMap[topTerre.valeur] || [];
+                        valMap[topTerre.valeur].push(topTerre);
+                        
+                        let wildcards = main.filter(c => c.estJoker || c.valeur === '2');
+                        let wIdx = 0;
+                        let groupesOuverture = [];
+                        
+                        for (let v in valMap) {
+                            let cartesV = valMap[v];
+                            if (cartesV.length >= 3) {
+                                pointsTotal += cartesV.reduce((s, c) => s + c.points, 0);
+                                groupesOuverture.push({ cartesId: cartesV.map(c => c.id) });
+                            } else if (autoriserJoker && cartesV.length === 2 && wildcards.length > wIdx) {
+                                const w = wildcards[wIdx++];
+                                pointsTotal += cartesV[0].points + cartesV[1].points + w.points;
+                                groupesOuverture.push({ cartesId: [cartesV[0].id, cartesV[1].id, w.id] });
+                            }
+                        }
+                        
+                        const topTerreUtilisee = groupesOuverture.some(g => g.cartesId.includes(topTerre.id));
+                        if (topTerreUtilisee && pointsTotal >= seuil) {
+                            const res = partie.actionRamasserTerre(numero, groupesOuverture);
+                            if (res.ok) {
+                                ramasserOk = true;
+                                let cartesAjoutees = [];
+                                groupesOuverture.forEach(g => {
+                                    if (g.cartesId) cartesAjoutees.push(...g.cartesId);
+                                });
+                                if (cartesAjoutees.length > 0) {
+                                    diffuserAnimation(this.salon, "animationDescendre", { numeroJoueur: numero, cartesAjoutees: cartesAjoutees });
+                                }
+                            }
+                        }
                     }
                 }
             }
-
-            if (!ramasserOk) {
-                const resPiocher = this.partie.actionPiocher(this.numero);
+            
+            if (ramasserOk) {
+                diffuserEtatGlobal(this.salon);
+            } else {
+                // 2. PIOCHER
+                const resPiocher = partie.actionPiocher(numero);
                 if (resPiocher.ok) {
                     if (resPiocher.piocheEpuisee) {
                         gererFinManche(this.salon, { recapManche: resPiocher.recapManche });
                         return;
                     }
                     Object.keys(this.salon.joueurs).forEach(sId => {
-                        if (!sId.startsWith('bot-')) this.io.to(sId).emit('animationPiocher', { joueur: this.numero, nbCartes: resPiocher.cartesRecues.length, cartesRecues: null });
+                        if (!sId.startsWith('bot-')) this.io.to(sId).emit('animationPiocher', { joueur: numero, nbCartes: resPiocher.cartesRecues.length, cartesRecues: null });
                     });
                     diffuserEtatGlobal(this.salon);
                 }
             }
             
-            // Smart melds logic
-            const valMap = {};
-            const wildcards = main.filter(c => c.estJoker || c.valeur === '2');
-            for (let c of main) {
-                if (!c.estJoker && c.valeur !== '2' && c.valeur !== '3' && c.valeur !== '3 Rouge') {
-                    valMap[c.valeur] = (valMap[c.valeur] || []);
-                    valMap[c.valeur].push(c);
-                }
-            }
+            // Recharger l'état de la main et de l'équipe après pioche/ramassage
+            main = partie.joueurs[numero].main;
+            equipe = partie.equipes[partie.equipeDuJoueur(numero)];
             
+            const nextNum = (numero % 4) + 1;
+            const nextEquipeNum = partie.equipeDuJoueur(nextNum);
+            const nextEquipe = partie.equipes[nextEquipeNum];
+            
+            // 3. DESCENDRE COMBINAISONS
             let groupesDescendre = [];
-            let wIdx = 0;
-            for (let v in valMap) {
-                let cartesNormales = valMap[v];
-                if (cartesNormales.length >= 3) {
-                    groupesDescendre.push({ cartesId: cartesNormales.map(c => c.id) });
-                } else if (cartesNormales.length === 2 && wildcards.length > wIdx) {
-                    // Use a wildcard to make a meld of 3
-                    const w = wildcards[wIdx++];
-                    groupesDescendre.push({ cartesId: [cartesNormales[0].id, cartesNormales[1].id, w.id] });
+            
+            if (!equipe.aOuvert) {
+                // Tenter d'ouvrir de sa main
+                let seuil = calculerSeuilOuverture(equipe.score);
+                let autoriserJoker = (this.toursSansOuverture >= 3 || seuil >= 90);
+                
+                let pointsTotal = 0;
+                const valMap = {};
+                for (const c of main) {
+                    if (!c.estJoker && c.valeur !== '2' && !c.est3Noir && c.valeur !== '3 Rouge') {
+                        valMap[c.valeur] = valMap[c.valeur] || [];
+                        valMap[c.valeur].push(c);
+                    }
+                }
+                let wildcards = main.filter(c => c.estJoker || c.valeur === '2');
+                let wIdx = 0;
+                let potentiels = [];
+                for (let v in valMap) {
+                    let cartesV = valMap[v];
+                    if (cartesV.length >= 3) {
+                        pointsTotal += cartesV.reduce((s, c) => s + c.points, 0);
+                        potentiels.push({ cartesId: cartesV.map(c => c.id) });
+                    } else if (autoriserJoker && cartesV.length === 2 && wildcards.length > wIdx) {
+                        const w = wildcards[wIdx++];
+                        pointsTotal += cartesV[0].points + cartesV[1].points + w.points;
+                        potentiels.push({ cartesId: [cartesV[0].id, cartesV[1].id, w.id] });
+                    }
+                }
+                if (pointsTotal >= seuil) {
+                    groupesDescendre = potentiels;
+                }
+            } else {
+                // Ajouter aux combinaisons existantes ou créer de nouvelles
+                const valMap = {};
+                let wildcards = main.filter(c => c.estJoker || c.valeur === '2');
+                let wIdx = 0;
+                
+                for (const c of main) {
+                    if (!c.estJoker && c.valeur !== '2' && !c.est3Noir && c.valeur !== '3 Rouge') {
+                        valMap[c.valeur] = valMap[c.valeur] || [];
+                        valMap[c.valeur].push(c);
+                    }
+                }
+                
+                for (let v in valMap) {
+                    let cartesV = valMap[v];
+                    let existingCombo = null;
+                    let cleUnique = null;
+                    
+                    // Chercher une combinaison existante
+                    for (const [key, combo] of Object.entries(equipe.table)) {
+                        if (combo.valeur === v && !combo.estCanasta) {
+                            existingCombo = combo; cleUnique = key; break;
+                        }
+                    }
+                    if (!existingCombo) {
+                        for (const [key, combo] of Object.entries(equipe.table)) {
+                            if (combo.valeur === v) {
+                                existingCombo = combo; cleUnique = key; break;
+                            }
+                        }
+                    }
+                    
+                    if (existingCombo) {
+                        // Ajout de cartes naturelles
+                        if (cartesV.length > 0) {
+                            groupesDescendre.push({ valeur: cleUnique, cartesId: cartesV.map(c => c.id) });
+                        }
+                    } else {
+                        // Nouveau groupe : On ne crée que des groupes purs de 3+ cartes !
+                        // On ne gaspille plus de Joker pour faire un groupe de 3 si on a déjà ouvert.
+                        if (cartesV.length >= 3) {
+                            groupesDescendre.push({ cartesId: cartesV.map(c => c.id) });
+                        }
+                    }
+                }
+                
+                // SCENARIO 1 : Gestion stratégique des jokers (Canastas Noires)
+                for (const [key, combo] of Object.entries(equipe.table)) {
+                    if (combo.cartes.length >= 7) continue; 
+                    
+                    let cartesEquipe = combo.cartes.filter(c => !c.estJoker && c.valeur !== '2').length;
+                    let cartesAdversaire = 0;
+                    for (const oppCombo of Object.values(nextEquipe.table)) {
+                        if (oppCombo.valeur === combo.valeur) {
+                            cartesAdversaire = oppCombo.cartes.filter(c => !c.estJoker && c.valeur !== '2').length;
+                            break;
+                        }
+                    }
+                    
+                    let cartesManquantes = 7 - combo.cartes.length;
+                    let canMakeCanastaInstantly = (wildcards.length - wIdx) >= cartesManquantes;
+                    // Si l'adversaire a déjà 5 cartes naturelles, il n'en reste que 7 dans le jeu (qui a 3 paquets de 4 = 12 cartes).
+                    // Faire une canasta pure devient quasiment impossible.
+                    let pureIsImpossible = (cartesAdversaire >= 5); 
+                    
+                    if (canMakeCanastaInstantly || pureIsImpossible) {
+                        let nbWilds = combo.cartes.filter(c => c.estJoker || c.valeur === '2').length;
+                        while (wIdx < wildcards.length && nbWilds < 3) {
+                            const w = wildcards[wIdx++];
+                            let gAjout = groupesDescendre.find(g => g.valeur === key);
+                            if (!gAjout) {
+                                gAjout = { valeur: key, cartesId: [] };
+                                groupesDescendre.push(gAjout);
+                            }
+                            gAjout.cartesId.push(w.id);
+                            nbWilds++;
+                            
+                            let totalNow = combo.cartes.length + gAjout.cartesId.length;
+                            if (totalNow >= 7) break;
+                        }
+                    }
                 }
             }
             
-            const teamHasPure = Object.values(equipe.table).some(c => c.estCanasta && c.verrouilleePure);
-            const teamHasImpure = Object.values(equipe.table).some(c => c.estCanasta && !c.verrouilleePure);
-            const canGoOut = teamHasPure && teamHasImpure;
-            let cardsUsed = groupesDescendre.reduce((sum, g) => sum + g.cartesId.length, 0);
-
-            if (!canGoOut && (main.length - cardsUsed) < 2) {
-                groupesDescendre = [];
+            // SCENARIO 4 : VÉRIFICATION SORTIE + TEMPORISATION
+            let teamHasPure = false;
+            let teamHasImpure = false;
+            for (const combo of Object.values(equipe.table)) {
+                if (combo.cartes.length >= 7) {
+                    const estPure = combo.cartes.every(c => !c.estJoker && (combo.valeur === '2' || c.valeur !== '2'));
+                    if (estPure) teamHasPure = true;
+                    else teamHasImpure = true;
+                }
+            }
+            let canGoOut = teamHasPure && teamHasImpure;
+            
+            const partenaireNum = equipe.membres.find(m => m !== numero);
+            const partenaireCartes = partie.joueurs[partenaireNum].main.length;
+            
+            if (canGoOut && partenaireCartes >= 5) {
+                canGoOut = false; // On temporise pour aider le partenaire
+            }
+            
+            if (!canGoOut) {
+                let currentUsed = 0;
+                let finalGroupes = [];
+                for (let g of groupesDescendre) {
+                    const cLen = g.cartesId.length;
+                    if (main.length - (currentUsed + cLen) >= 2) {
+                        finalGroupes.push(g);
+                        currentUsed += cLen;
+                    } else {
+                        if (g.valeur) {
+                            const maxAllowed = main.length - currentUsed - 2;
+                            if (maxAllowed > 0) {
+                                finalGroupes.push({ valeur: g.valeur, cartesId: g.cartesId.slice(0, maxAllowed) });
+                                currentUsed += maxAllowed;
+                            }
+                        }
+                        break; 
+                    }
+                }
+                groupesDescendre = finalGroupes;
             }
 
             if (groupesDescendre.length > 0) {
-                const resDescendre = this.partie.actionDescendreCombinaisons(this.numero, groupesDescendre);
-                if (resDescendre.ok) { 
-                    diffuserAnimation(this.salon, "animationDescendre", this.numero); 
+                let cartesAjoutees = [];
+                groupesDescendre.forEach(g => {
+                    if (g.cartesId) cartesAjoutees.push(...g.cartesId);
+                });
+
+                // Délai avant de descendre ses combinaisons pour que le joueur puisse suivre l'action
+                await new Promise(r => setTimeout(r, 1000 + Math.random() * 500));
+                
+                const resDescendre = partie.actionDescendreCombinaisons(numero, groupesDescendre);
+                if (resDescendre.ok) {
+                    diffuserAnimation(this.salon, "animationDescendre", { numeroJoueur: numero, cartesAjoutees: cartesAjoutees }); 
                     diffuserEtatGlobal(this.salon); 
+                    if (resDescendre.mancheTerminee) {
+                        gererFinManche(this.salon, { recapManche: resDescendre.recapManche });
+                        return;
+                    }
                 }
             }
             
-            // Simple discard
+            main = partie.joueurs[numero].main;
+            
+            // 4. JETER (Défensif, Geler la terre)
+            const nextMelds = Object.values(nextEquipe.table).map(m => m.valeur);
+            const lastDiscardedByNext = partie.dernieresCartesJetees ? partie.dernieresCartesJetees[nextNum] : null;
+            
             let jeterId = null;
-            const updatedMain = this.partie.joueurs[this.numero].main;
-            const normales = updatedMain.filter(c => !c.estJoker && c.valeur !== '2');
-            if (normales.length > 0) {
-                normales.sort((a,b) => a.points - b.points); // Jette les plus petits points
-                jeterId = normales[0].id;
-            } else if (updatedMain.length > 0) {
-                jeterId = updatedMain[0].id;
+            const black3s = main.filter(c => c.est3Noir);
+            
+            // SCENARIO 2 : Analyse de la défausse pour voir si on doit geler
+            let oppWantsPile = false;
+            if (partie.defausse.length >= 4) { // Terre volumineuse
+                for (let card of partie.defausse) {
+                    if (!card.estJoker && card.valeur !== '2' && card.valeur !== '3') {
+                        if (nextMelds.includes(card.valeur)) {
+                            oppWantsPile = true; break;
+                        }
+                    }
+                }
+            }
+            
+            // Cartes spéciales (Jokers/2) non utilisées dans la descente
+            const usedInDescend = new Set();
+            groupesDescendre.forEach(g => g.cartesId.forEach(id => usedInDescend.add(id)));
+            const freeWildcards = main.filter(c => (c.estJoker || c.valeur === '2') && !usedInDescend.has(c.id));
+
+            if (oppWantsPile && freeWildcards.length > 0) {
+                // SCENARIO 2 : On gèle la terre car elle est très dangereuse
+                jeterId = freeWildcards[0].id;
+            } else if (black3s.length > 0) {
+                jeterId = black3s[0].id; // Toujours jeter les 3 noirs (très défensif classique)
+            } else {
+                const normales = main.filter(c => !c.estJoker && c.valeur !== '2' && c.valeur !== '3 Rouge');
+                if (normales.length > 0) {
+                    normales.sort((a,b) => a.points - b.points); 
+                    
+                    const safeDiscards = normales.filter(c => nextMelds.includes(c.valeur) || c.valeur === lastDiscardedByNext);
+                    
+                    if (safeDiscards.length > 0) {
+                        jeterId = safeDiscards[0].id;
+                    } else {
+                        jeterId = normales[0].id; // Tant pis, on jette la plus petite
+                    }
+                } else if (main.length > 0) {
+                    jeterId = main[0].id;
+                }
             }
             
             if (jeterId) {
-                let resJeter = this.partie.actionJeter(this.numero, jeterId);
+                // Délai avant de jeter la carte (fin du tour)
+                await new Promise(r => setTimeout(r, 1000 + Math.random() * 500));
+                
+                let resJeter = partie.actionJeter(numero, jeterId);
                 if (!resJeter.ok) {
-                    // Fallback
-                    const currentMain = this.partie.joueurs[this.numero].main;
-                    for (let c of currentMain) {
-                        resJeter = this.partie.actionJeter(this.numero, c.id);
+                    // Fallback absolu
+                    for (let c of main) {
+                        resJeter = partie.actionJeter(numero, c.id);
                         if (resJeter.ok) { jeterId = c.id; break; }
                     }
                 }
 
                 if (resJeter.ok) {
-                    diffuserAnimation(this.salon, 'animationJeter', this.numero);
+                    diffuserAnimation(this.salon, 'animationJeter', numero);
                     if (resJeter.mancheTerminee) {
                         gererFinManche(this.salon, resJeter);
                     } else {
@@ -140,7 +395,7 @@ class BotJoueur {
                     }
                 }
             }
-        }, 1500 + Math.random() * 1000);
+        // Fin du tour du bot
     }
 }
 
@@ -158,18 +413,6 @@ function diffuserAlerte(salon, message) {
 function gererFinManche(salon, resultat) {
     diffuserAlerte(salon, `Manche terminée ! Raison : ${resultat.recapManche.raison}`);
     diffuserEtatGlobal(salon); // Envoie l'état avec dernierRecapManche et enJeu=false
-    
-    if (!salon.partie.partieTerminee) {
-        // Redémarrer automatiquement dans 10 secondes
-        setTimeout(() => {
-            if (salon && salon.partie && !salon.partie.enJeu) {
-                salon.partie.demarrerNouvelleManche(salon.partie.prochainPremierJoueur);
-                diffuserChangementTour(salon, salon.partie.tourActuel);
-                verifierTourBot(salon, salon.partie.tourActuel);
-                diffuserEtatGlobal(salon);
-            }
-        }, 12000); // 12 seconds de recap
-    }
 }
 
 function diffuserChangementTour(salon, numTour) {
@@ -205,11 +448,15 @@ function diffuserEtatGlobal(salon) {
         nomsJoueurs[num] = { pseudo: nom, avatar: avatar };
     }
 
+    const couleursJoueurs = { 1: '#3fa0e0', 2: '#e6483f', 3: '#f2c516', 4: '#4ade80' };
+
     for (let idConnexion in salon.joueurs) {
         if (idConnexion.startsWith('bot-')) continue;
         let num = salon.joueurs[idConnexion];
         let etatJoueur = salon.partie.getEtatPourJoueur(num);
         etatJoueur.nomsJoueurs = nomsJoueurs;
+        etatJoueur.couleursJoueurs = couleursJoueurs;
+        etatJoueur.hote = salon.hote;
         io.to(idConnexion).emit('miseAJourEtat', etatJoueur);
     }
     if (salon.spectateurs.size > 0) {
@@ -218,6 +465,8 @@ function diffuserEtatGlobal(salon) {
         etatSpectateur.monNumero = null;
         etatSpectateur.monEquipe = null;
         etatSpectateur.nomsJoueurs = nomsJoueurs;
+        etatSpectateur.couleursJoueurs = couleursJoueurs;
+        etatSpectateur.hote = salon.hote;
         for (let spec of salon.spectateurs) {
             io.to(spec).emit('miseAJourEtat', etatSpectateur);
         }
@@ -478,6 +727,16 @@ io.on('connection', (socket) => {
         io.emit('listeSalons', getListeSalonsData());
     });
 
+    socket.on('demandeNouvelleManche', () => {
+        const salon = getSalonPourSocket(socket.id);
+        if (!salon || salon.hote !== socket.id || !salon.partie || salon.partie.enJeu || salon.partie.partieTerminee) return;
+        
+        salon.partie.demarrerNouvelleManche(salon.partie.prochainPremierJoueur);
+        diffuserChangementTour(salon, salon.partie.tourActuel);
+        verifierTourBot(salon, salon.partie.tourActuel);
+        diffuserEtatGlobal(salon);
+    });
+
     // Game Events
     socket.on('demandeJouerCarte', (carteId) => {
         const salon = getSalonPourSocket(socket.id);
@@ -658,6 +917,9 @@ io.on('connection', (socket) => {
             
             const salon = salons[data.roomId];
             if (salon) {
+                if (salon.hote === token) {
+                    salon.hote = socket.id;
+                }
                 salon.joueurs[socket.id] = data.numero;
                 joueursDansSalons[socket.id] = data.roomId;
                 
@@ -681,6 +943,10 @@ io.on('connection', (socket) => {
                 delete salon.joueurs[token];
                 delete joueursDansSalons[token];
                 
+                if (salon.hote === token) {
+                    salon.hote = socket.id;
+                }
+
                 salon.joueurs[socket.id] = numero;
                 joueursDansSalons[socket.id] = roomId;
                 
