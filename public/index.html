@@ -13,27 +13,44 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/css/style.css?v=14">
+    <link rel="stylesheet" href="/css/style.css?v=1787658409718">
     <script src="/socket.io/socket.io.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
-    <link rel="stylesheet" href="/css/style-pro.css?v=5">
-    <script src="/js/jeu-client-pro.js?v=5" defer></script>
+    <link rel="stylesheet" href="/css/style-pro.css?v=1787658571126">
+    <script src="/js/jeu-client-pro.js?v=1787664761990" defer></script>
 </head>
 <body>
-    <!-- SCREEN 1: LOBBY -->
-    <div id="ecran-lobby">
-        <div class="lobby-conteneur">
+    <!-- SCREEN 1: LOGIN -->
+    <div id="ecran-login" class="ecran-plein">
+        <div class="login-conteneur">
             <div class="lobby-header">
-                <span class="lobby-logo">🃏</span>
+                <span class="lobby-logo" style="font-size: 3rem;">🃏</span>
                 <div class="lobby-title-group">
-                    <h1>Canasta <span>Libanaise</span></h1>
-                    <p class="lobby-sous-titre">Jeu de cartes multijoueur</p>
+                    <h1 style="font-size: 2.5rem;">Canasta <span>Libanaise</span></h1>
+                    <p class="lobby-sous-titre">L'expérience ultime</p>
                 </div>
             </div>
             
-            <div class="profil-card">
-                <h3 class="profil-card-title">Votre Profil</h3>
-                <input type="text" id="input-pseudo" placeholder="Votre Pseudo" maxlength="15" class="input-profil">
+            <!-- AUTHENTICATION OPTIONS -->
+            <div id="auth-main-options">
+                <button id="btn-show-login" class="btn btn-gold btn-xl" style="width:100%; margin-bottom:15px; font-size:1.2rem; padding:15px;">SE CONNECTER</button>
+                <button id="btn-show-register" class="btn btn-blue btn-xl" style="width:100%; margin-bottom:15px; font-size:1.2rem; padding:15px;">CRÉER UN COMPTE</button>
+                <button id="btn-auth-guest" class="btn btn-dark btn-large" style="width:100%; padding:15px;">Jouer en Invité</button>
+            </div>
+
+            <!-- LOGIN FORM -->
+            <div id="auth-login-form" style="display:none; flex-direction:column; gap:15px;">
+                <input type="text" id="login-username" placeholder="Pseudo" maxlength="15" class="input-profil">
+                <input type="password" id="login-password" placeholder="Mot de passe" class="input-profil">
+                <button id="btn-do-login" class="btn btn-gold btn-xl" style="padding:15px;">Connexion</button>
+                <button class="btn btn-dark btn-retour-auth">Retour</button>
+            </div>
+
+            <!-- REGISTER FORM -->
+            <div id="auth-register-form" style="display:none; flex-direction:column; gap:15px;">
+                <input type="text" id="register-username" placeholder="Pseudo" maxlength="15" class="input-profil">
+                <input type="password" id="register-password" placeholder="Mot de passe" class="input-profil">
+                <h4 style="color:white; margin:0;">Choisissez votre Avatar</h4>
                 <div id="avatar-selector" class="avatar-grid">
                     <div class="avatar-option selected" data-avatar="👤">👤</div>
                     <div class="avatar-option" data-avatar="🦊">🦊</div>
@@ -41,8 +58,94 @@
                     <div class="avatar-option" data-avatar="🐼">🐼</div>
                     <div class="avatar-option" data-avatar="🐯">🐯</div>
                 </div>
+                <button id="btn-do-register" class="btn btn-blue btn-xl" style="padding:15px;">S'inscrire</button>
+                <button class="btn btn-dark btn-retour-auth">Retour</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- SCREEN 1.5: MAIN MENU -->
+    <div id="ecran-menu-principal" class="ecran-plein" style="display:none; justify-content:center; align-items:center; background: radial-gradient(circle at center, #1a2a20, #000000);">
+        <div class="menu-conteneur" style="width:90%; max-width:400px; padding:20px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:24px; box-shadow:0 20px 50px rgba(0,0,0,0.5); backdrop-filter:blur(10px);">
+            
+            <!-- HEADER: Avatar & Pseudo -->
+            <div style="text-align:center; margin-bottom:15px;">
+                <div id="menu-display-avatar" style="font-size:3.5rem; background:linear-gradient(135deg, rgba(255,215,0,0.2), rgba(255,215,0,0.05)); border:2px solid var(--gold); border-radius:50%; width:90px; height:90px; display:inline-flex; justify-content:center; align-items:center; box-shadow:0 0 20px rgba(255,215,0,0.3); margin-bottom:10px;">🐤</div>
+                <h2 id="menu-display-pseudo" style="margin:0; color:white; font-size:1.6rem; letter-spacing:1px; text-shadow:0 2px 4px rgba(0,0,0,0.8);">Joueur</h2>
+            </div>
+            
+            <!-- XP BAR -->
+            <div style="background:rgba(0,0,0,0.4); border-radius:16px; padding:12px; margin-bottom:20px; border:1px solid rgba(255,255,255,0.05); box-shadow:inset 0 4px 10px rgba(0,0,0,0.5);">
+                <div style="display:flex; justify-content:space-between; color:white; font-size:0.85rem; font-weight:bold; margin-bottom:8px; text-transform:uppercase; letter-spacing:1px;">
+                    <span id="texte-niveau" style="color:var(--gold); text-shadow:0 0 5px rgba(255,215,0,0.5);">⭐ Niv 1</span>
+                    <span id="texte-xp" style="color:#aaa;">0 XP</span>
+                </div>
+                <div style="width:100%; height:12px; background:rgba(255,255,255,0.1); border-radius:6px; overflow:hidden; box-shadow:inset 0 1px 3px rgba(0,0,0,0.5);">
+                    <div id="barre-xp" style="width:0%; height:100%; background:linear-gradient(90deg, #f2c516, #e6483f); box-shadow:0 0 10px rgba(242,197,22,0.8); transition:width 0.8s cubic-bezier(0.4, 0, 0.2, 1);"></div>
+                </div>
             </div>
 
+            <!-- STATS GRID -->
+            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-bottom:25px;">
+                <div style="background:rgba(255,255,255,0.05); border-radius:12px; padding:12px 5px; text-align:center; border:1px solid rgba(255,215,0,0.2);">
+                    <div style="color:#ccc; font-size:0.7rem; text-transform:uppercase; margin-bottom:5px; font-weight:bold;">🏆 Victoires</div>
+                    <div id="stat-gagnees" style="color:var(--gold); font-size:1.4rem; font-weight:900; text-shadow:0 2px 4px rgba(0,0,0,0.5);">0</div>
+                </div>
+                <div style="background:rgba(255,255,255,0.05); border-radius:12px; padding:12px 5px; text-align:center; border:1px solid rgba(165,94,234,0.2);">
+                    <div style="color:#ccc; font-size:0.7rem; text-transform:uppercase; margin-bottom:5px; font-weight:bold;">🎮 Parties</div>
+                    <div id="stat-jouees" style="color:#a55eea; font-size:1.4rem; font-weight:900; text-shadow:0 2px 4px rgba(0,0,0,0.5);">0</div>
+                </div>
+                <div style="background:rgba(255,255,255,0.05); border-radius:12px; padding12px 5px; text-align:center; border:1px solid rgba(38,222,129,0.2);">
+                    <div style="color:#ccc; font-size:0.7rem; text-transform:uppercase; margin-bottom:5px; font-weight:bold;">⭐ Record</div>
+                    <div id="stat-record" style="color:var(--green); font-size:1.4rem; font-weight:900; text-shadow:0 2px 4px rgba(0,0,0,0.5);">0</div>
+                </div>
+            </div>
+
+            <!-- BUTTONS -->
+            <div class="menu-buttons" style="display:flex; flex-direction:column; gap:12px;">
+                <!-- SOLO -->
+                <button id="btn-menu-solo" style="background:linear-gradient(135deg, #f1c40f, #d35400); border:none; border-radius:16px; padding:15px; display:flex; align-items:center; box-shadow:0 6px 0 #b33939, 0 10px 20px rgba(0,0,0,0.4); cursor:pointer; transform:translateY(0); transition:all 0.1s; position:relative; overflow:hidden;">
+                    <div style="font-size:2.2rem; margin-right:15px; filter:drop-shadow(0 2px 2px rgba(0,0,0,0.3));">🎮</div>
+                    <div style="text-align:left; color:white;">
+                        <div style="font-size:1.3rem; font-weight:900; text-transform:uppercase; letter-spacing:1px; text-shadow:0 2px 2px rgba(0,0,0,0.3);">Jouer en Solo</div>
+                        <div style="font-size:0.85rem; color:rgba(255,255,255,0.9); font-weight:600;">Partie rapide contre 3 I.A.</div>
+                    </div>
+                </button>
+
+                <!-- MULTI -->
+                <button id="btn-menu-multi" style="background:linear-gradient(135deg, #3498db, #2980b9); border:none; border-radius:16px; padding:15px; display:flex; align-items:center; box-shadow:0 6px 0 #1f618d, 0 10px 20px rgba(0,0,0,0.4); cursor:pointer;">
+                    <div style="font-size:2.2rem; margin-right:15px; filter:drop-shadow(0 2px 2px rgba(0,0,0,0.3));">🌘</div>
+                    <div style="text-align:left; color:white;">
+                        <div style="font-size:1.3rem; font-weight:900; text-transform:uppercase; letter-spacing:1px; text-shadow:0 2px 2px rgba(0,0,0,0.3);">Multijoueur</div>
+                        <div style="font-size:0.85rem; color:rgba(255,255,255,0.9); font-weight:600;">Jouez avec vos amis</div>
+                    </div>
+                </button>
+                
+                <!-- TUTO & CLASSEMENT -->
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                    <button id="btn-menu-tuto" style="background:linear-gradient(135deg, #9b59b6, #8e44ad); border:none; border-radius:12px; padding:12px; display:flex; justify-content:center; align-items:center; gap:8px; box-shadow:0 4px 0 #732d91; cursor:pointer; color:white; font-weight:bold; text-transform:uppercase; font-size:0.95rem;">
+                        <span style="font-size:1.3rem;">🎓</span> Tuto
+                    </button>
+                    
+                    <button id="btn-menu-regles" style="background:linear-gradient(135deg, #16a085, #1abc9c); border:none; border-radius:12px; padding:12px; display:flex; justify-content:center; align-items:center; gap:8px; box-shadow:0 4px 0 #117a65; cursor:pointer; color:white; font-weight:bold; text-transform:uppercase; font-size:0.95rem;">
+                        📚 Règles du Jeu
+                    </button>
+                    <button id="btn-menu-classement" style="background:linear-gradient(135deg, #34495e, #2c3e50); border:none; border-radius:12px; padding:12px; display:flex; justify-content:center; align-items:center; gap:8px; box-shadow:0 4px 0 #1a252f; cursor:pointer; color:white; font-weight:bold; text-transform:uppercase; font-size:0.95rem;">
+                        <span style="font-size:1.3rem;">🏆</span> Top 20
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SCREEN 1.8: LOBBY MULTI -->
+    <div id="ecran-lobby" class="ecran-plein" style="display:none;">
+        <div class="lobby-conteneur">
+            <div class="lobby-header-mini">
+                <button id="btn-lobby-retour" class="btn btn-dark" style="margin-right:auto;">← Retour</button>
+                <h2>Multijoueur</h2>
+            </div>
+            
             <div class="lobby-create-section">
                 <div class="lobby-actions">
                     <input type="text" id="input-nom-salon" placeholder="Nom du salon..." maxlength="30">
@@ -87,6 +190,20 @@
 
     <!-- SCREEN 3: GAME TABLE -->
     <div id="ecran-jeu" style="display:none;">
+<!-- Tutorial Banner (Pro) -->
+<div id="tuto-banner" style="display:none; position:fixed; top:0; left:0; right:0; z-index:9999; background:linear-gradient(135deg,#1a1a2e,#16213e); border-bottom:2px solid #f0c040; padding:8px 12px; box-shadow:0 4px 20px rgba(0,0,0,0.6),0 0 10px rgba(240,192,64,0.2);">
+  <div style="display:flex; align-items:center; gap:10px; max-width:100%;">
+    <span id="tuto-badge" style="background:#f0c040; color:#1a1a2e; font-weight:900; font-size:11px; min-width:20px; height:20px; border-radius:50%; display:flex; align-items:center; justify-content:center; flex-shrink:0;">1</span>
+    <div style="flex:1; min-width:0;">
+      <div id="tuto-title" style="font-weight:700; color:#f0c040; font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"></div>
+      <div id="tuto-desc" style="color:#ccc; font-size:11px; line-height:1.4; margin-top:2px;"></div>
+    </div>
+    <button id="tuto-skip" style="flex-shrink:0; background:none; border:1px solid rgba(255,255,255,0.3); color:#aaa; font-size:10px; padding:4px 10px; border-radius:8px; cursor:pointer;">Passer</button>
+  </div>
+  <div style="margin-top:6px; height:3px; background:rgba(255,255,255,0.1); border-radius:2px; overflow:hidden;">
+    <div id="tuto-progress" style="height:100%; background:linear-gradient(90deg,#f0c040,#e6a800); border-radius:2px; transition:width 0.4s ease; width:0%;"></div>
+  </div>
+</div>
 <svg style="display:none">
   <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
   <symbol id="i-chat" viewBox="0 0 24 24"><path d="M4 5h16a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H9l-4 4v-4H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></symbol>
@@ -107,11 +224,14 @@
   </div>
   <div class="table-wrap">
     <!-- Left Top Buttons -->
-    <div style="position:absolute; top:calc(8px + var(--safe-t)); left:calc(8px + var(--safe-l)); z-index:50; display:flex; flex-direction:column; gap:8px;">
+    <div style="position:absolute; top:calc(8px + var(--safe-t)); left:calc(8px + var(--safe-l)); z-index:150; display:flex; flex-direction:column; gap:8px;">
         <button id="btn-emoji" style="width:32px; height:32px; display:flex; align-items:center; justify-content:center; background:var(--panel-strong); border:1px solid var(--line); border-radius:9px; font-size:18px; cursor:pointer;" title="Envoyer Emoji">😀</button>
     </div>
+    <!-- Score Panels -->
+    <div class="score-single nous"><div class="lbl">NOUS</div><div class="val" id="score-nous">0</div></div>
+    <div class="score-single eux"><div class="lbl">EUX</div><div class="val" id="score-eux">0</div></div>
     <!-- Top Right Menu & Turn Indicator -->
-    <div style="position:absolute; top:calc(8px + var(--safe-t)); right:calc(8px + var(--safe-r)); z-index:50; display:flex; align-items:center; gap:10px;">
+    <div style="position:absolute; top:calc(8px + var(--safe-t)); right:calc(8px + var(--safe-r)); z-index:150; display:flex; align-items:center; gap:10px;">
         <button class="menu-btn" style="position:static;"><svg class="icon"><use href="#i-menu"/></svg></button>
     </div>
     <!-- Emoji Panel -->
@@ -187,14 +307,15 @@
         <div class="meld-ghost">+</div>
       </div>
     </div>
-    <div id="indicateur-tour" class="turn-indicator" style="position:absolute; bottom:calc(115px + var(--safe-b)); left:calc(10px + var(--safe-l)); z-index:45;"><span class="turn-dot"></span>Tour : Vous</div>
     <div class="player-area">
       <div id="conteneur-main" class="hand">
       </div>
     </div>
-    <div class="centre-actions" style="position:absolute; right:calc(4px + var(--safe-r)); bottom:calc(8px + var(--safe-b)); z-index:60; display:flex; flex-direction:column; align-items:flex-end; gap:6px;">
+    <div id="indicateur-tour" class="turn-indicator" style="position:absolute; right:calc(5px + var(--safe-r)); bottom:calc(120px + var(--safe-b)); z-index:45; font-size:8.5px; padding:0; gap:3px; width:58px; justify-content:center; white-space:nowrap; box-sizing:border-box; background:transparent; border:none; box-shadow:none;"><span class="turn-dot" style="flex-shrink:0;"></span>Tour:Vous</div>
+    <div id="centre-actions" class="centre-actions" style="position:absolute; right:calc(4px + var(--safe-r)); bottom:calc(8px + var(--safe-b)); z-index:60; display:flex; flex-direction:column; align-items:flex-end; gap:6px;">
         <div id="indicateur-score-pose" class="turn-indicator" style="display:none; position:relative; right:auto; bottom:auto; top:auto; margin-bottom:2px;">Score : 0</div>
         <div style="display:flex; flex-direction:column; gap:3px; align-items:flex-end; width:100%;">
+            <button id="btn-lock" style="display:none; background:transparent; border:none; box-shadow:none; font-size:24px; padding:0; width:100%; text-align:center; cursor:pointer;" title="Verrouiller le groupe actuel">🔒</button>
             <button id="btn-sortir" style="display:none; padding:6px 10px; border-radius:14px; font-weight:800; font-size:10px; background:var(--red); color:white; border:2px solid #fff; cursor:pointer; box-shadow:0 3px 8px rgba(0,0,0,0.5);" title="Sortir ?">DEMANDER</button>
             <button id="btn-jeter" class="descendre-fab" style="display:none; background:var(--red); color:white; text-align:center; justify-content:center; width:100%;" title="Jeter la carte">JETER</button>
             <button id="btn-poser" class="descendre-fab" style="text-align:center; justify-content:center; width:100%;" title="Poser les cartes"><svg class="icon"><use href="#i-down"/></svg>POSER</button>
@@ -208,6 +329,59 @@
 
 </div>
     <!-- MODALS -->
+
+<div id="modal-regles" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:300; justify-content:center; align-items:center;">
+    <div style="background:var(--panel-strong); border:2px solid var(--gold); border-radius:16px; width:95%; max-width:600px; max-height:85vh; display:flex; flex-direction:column;">
+        <div style="padding:15px; border-bottom:1px solid rgba(255,255,255,0.1); display:flex; justify-content:space-between; align-items:center;">
+            <h2 style="color:var(--gold); margin:0; font-size:1.5rem;">📚 Règles de la Canasta</h2>
+            <button id="btn-fermer-regles" style="background:transparent; border:none; color:white; font-size:2rem; cursor:pointer; line-height:1;">&times;</button>
+        </div>
+        <div style="padding:20px; overflow-y:auto; flex-grow:1; color:white; line-height:1.6; font-size:14px; text-align:left;">
+            <h3 style="color:#f1c40f; margin-top:0;">🎯 But du jeu</h3>
+            <p>Se joue en équipe (2v2). La première équipe à atteindre <strong>15 000 points</strong> gagne. Le jeu utilise 3 paquets + 6 jokers (162 cartes).</p>
+            
+            <h3 style="color:#f1c40f;">🃏 Les Cartes</h3>
+            <ul style="padding-left:20px; margin-bottom:15px;">
+                <li><strong>Joker</strong> : 50 pts (Wildcard)</li>
+                <li><strong>2</strong> : 25 pts (Wildcard)</li>
+                <li><strong>As</strong> : 20 pts</li>
+                <li><strong>8 au Roi</strong> : 10 pts</li>
+                <li><strong>4 au 7</strong> : 5 pts</li>
+                <li><strong>3 Rouge</strong> : +100 pts bonus si Canasta, sinon -100 pts (Posés automatiquement)</li>
+                <li><strong>3 Noir</strong> : Bloque la défausse. Impossible à combiner.</li>
+            </ul>
+
+            <h3 style="color:#f1c40f;">🔓 L'Ouverture</h3>
+            <p>Pour faire sa première pose, l'équipe doit atteindre un minimum de points selon son score actuel :</p>
+            <ul style="padding-left:20px; margin-bottom:15px;">
+                <li>Négatif : <strong>15 pts</strong></li>
+                <li>0 à 1 495 : <strong>50 pts</strong></li>
+                <li>1 500 à 2 995 : <strong>90 pts</strong></li>
+                <li>3 000 à 6 995 : <strong>120 pts</strong></li>
+                <li>7 000 et + : <strong>150 pts</strong></li>
+            </ul>
+
+            <h3 style="color:#f1c40f;">🧩 Combinaisons & Canastas</h3>
+            <p>Un groupe nécessite au minimum 3 cartes. Il faut <strong>TOUJOURS plus de cartes naturelles que de wildcards</strong>.</p>
+            <ul style="padding-left:20px; margin-bottom:15px;">
+                <li><strong>Canasta (7+ cartes)</strong> : Obligatoire pour finir la manche.</li>
+                <li><strong>Canasta Pure</strong> (aucun joker/2) : +500 pts (+1500 pour les As, +3000 pour les 2).</li>
+                <li><strong>Canasta Impure</strong> (avec joker/2) : +350 pts (+750 pour les As, +1500 pour les 2).</li>
+            </ul>
+
+            <h3 style="color:#f1c40f;">📥 Prendre la Terre (Défausse)</h3>
+            <ul style="padding-left:20px; margin-bottom:15px;">
+                <li><strong>Terre normale</strong> : Il vous faut 2 cartes naturelles identiques en main pour ramasser (la carte du haut complète le brelan).</li>
+                <li><strong>Terre gelée</strong> : Si un joker ou un 2 est dans le tas, la terre est gelée. Il vous faut alors <strong>3 cartes naturelles identiques en main</strong> pour la prendre.</li>
+                <li>Vous ne pouvez <strong>jamais</strong> ramasser si un Joker, un 2, ou un 3 Noir se trouve sur le dessus du tas.</li>
+            </ul>
+
+            <h3 style="color:#f1c40f;">🚪 Sortir (Finir la manche)</h3>
+            <p>L'équipe doit posséder <strong>au moins 1 Canasta Pure ET 1 Canasta Impure</strong>. Il faut vider sa main et jeter une dernière carte. Vous pouvez "Demander" à votre partenaire si vous êtes autorisé à sortir.</p>
+        </div>
+    </div>
+</div>
+
     <div id="modal-overlay" style="display:none;">
         <div id="modal-scores" class="modal-panel" style="display:none; max-width: 800px; width: 90%;">
             <h2>📊 Scores de la Manche</h2>
@@ -220,6 +394,8 @@
                 <p>Paramètres de la partie</p>
             </div>
             <button id="btn-quitter-jeu" class="btn btn-large" style="background: var(--red); color: white; border: 2px solid white; margin-bottom: 10px; font-weight: bold; border-radius: 12px;">🚪 Quitter la partie</button>
+            
+            <button id="btn-param-regles" class="btn btn-large" style="background: #16a085; color: white; border-radius: 12px; font-weight: bold; margin-bottom: 10px; border:none;">📚 Règles du Jeu</button>
             <button id="btn-fermer-parametres" class="btn btn-large" style="background: #333; color: white; border-radius: 12px; font-weight: bold;">Fermer</button>
         </div>
         <div id="modal-sortie" class="modal-panel" style="display:none;">
@@ -239,3 +415,47 @@
     <div id="toast-container"></div>
 </body>
 </html>
+<!-- CLASSEMENT MODAL -->
+<div id="modal-classement" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:200; justify-content:center; align-items:center;">
+    <div style="background:var(--panel-strong); border:2px solid var(--gold); border-radius:16px; width:90%; max-width:400px; max-height:80vh; display:flex; flex-direction:column;">
+        <div style="padding:15px; border-bottom:1px solid rgba(255,255,255,0.1); display:flex; justify-content:space-between; align-items:center;">
+            <h2 style="color:var(--gold); margin:0;">?? Top 20 Mondial</h2>
+            <button id="btn-fermer-classement" style="background:transparent; border:none; color:white; font-size:1.5rem; cursor:pointer;">&times;</button>
+        </div>
+        <div id="liste-classement" style="padding:15px; overflow-y:auto; flex-grow:1; display:flex; flex-direction:column; gap:10px;">
+            <div style="color:white; text-align:center;">Chargement...</div>
+        </div>
+    </div>
+</div>
+<!-- CONFETTI SCRIPT -->
+<script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+
+<!-- TUTORIAL SCRIPT (Pro) -->
+<script src="js/tutoriel.js?v=1787666502093"></script>
+
+<style>
+@keyframes tutoPulse {
+    0% { box-shadow: 0 0 0 0 rgba(240, 192, 64, 0.7); }
+    40% { box-shadow: 0 0 0 12px rgba(240, 192, 64, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(240, 192, 64, 0); }
+}
+@keyframes tutoGlow {
+    0%, 100% { border-color: #f0c040; }
+    50% { border-color: #fff; }
+}
+@keyframes tutoFadeIn {
+    from { opacity:0; transform: translateY(8px); }
+    to { opacity:1; transform: translateY(0); }
+}
+.tuto-highlight {
+    animation: tutoPulse 1.2s infinite, tutoGlow 1.5s infinite !important;
+    border: 3px solid #f0c040 !important;
+    border-radius: 10px;
+    position: relative;
+    z-index: 9998 !important;
+}
+#tuto-tooltip {
+    animation: tutoFadeIn 0.3s ease-out;
+}
+</style>
+

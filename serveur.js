@@ -3,7 +3,8 @@ const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
 
-const { PartieCanasta, calculerSeuilOuverture } = require('./serveur-logique/jeu'); 
+const { PartieCanasta, calculerSeuilOuverture } = require('./serveur-logique/jeu');
+const db = require('./serveur-logique/database'); 
 
 const app = express();
 const serveur = http.createServer(app);
@@ -31,10 +32,10 @@ class BotJoueur {
         this.partie = salon.partie;
         this.io = serverIo;
     }
-    async jouerTour() {
+    async jouerTour() { console.log("Bot jouerTour started for bot " + this.numero);
+        try {
         // Délai initial avant toute action (réflexion du bot)
-        await new Promise(r => setTimeout(r, 1200 + Math.random() * 800));
-        if (!this.partie || !this.partie.enJeu) return;
+        await new Promise(r => setTimeout(r, 1200 + Math.random() * 800)); if (!this.partie || !this.partie.enJeu) return;
         
         const numero = this.numero;
         const partie = this.partie;
@@ -325,7 +326,7 @@ class BotJoueur {
             
             main = partie.joueurs[numero].main;
             
-            // 4. JETER (Défensif, Geler la terre)
+            console.log("Bot " + this.numero + " JETER"); // 4. JETER (Défensif, Geler la terre)
             const nextMelds = Object.values(nextEquipe.table).map(m => m.valeur);
             const lastDiscardedByNext = partie.dernieresCartesJetees ? partie.dernieresCartesJetees[nextNum] : null;
             
@@ -375,7 +376,7 @@ class BotJoueur {
                 // Délai avant de jeter la carte (fin du tour)
                 await new Promise(r => setTimeout(r, 1000 + Math.random() * 500));
                 
-                let resJeter = partie.actionJeter(numero, jeterId);
+                 let resJeter = partie.actionJeter(numero, jeterId); 
                 if (!resJeter.ok) {
                     // Fallback absolu
                     for (let c of main) {
@@ -395,6 +396,7 @@ class BotJoueur {
                     }
                 }
             }
+        } catch (err) { console.error("BOT ERROR: ", err); }
         // Fin du tour du bot
     }
 }
@@ -413,6 +415,19 @@ function diffuserAlerte(salon, message) {
 function gererFinManche(salon, resultat) {
     diffuserAlerte(salon, `Manche terminée ! Raison : ${resultat.recapManche.raison}`);
     diffuserEtatGlobal(salon); // Envoie l'état avec dernierRecapManche et enJeu=false
+
+    // Si la partie entière est terminée, mettre à jour la BDD
+    if (salon.partie && salon.partie.partieTerminee) {
+        let vainqueur = salon.partie.vainqueur;
+        for (let sId in salon.joueurs) {
+            if (!sId.startsWith('bot-') && profilsJoueurs[sId] && profilsJoueurs[sId].dbId) {
+                let eq = salon.partie.joueurs[salon.joueurs[sId]].equipe;
+                let isWin = (eq === vainqueur);
+                let score = salon.partie.equipes[eq].score;
+                db.updateUserStats(profilsJoueurs[sId].dbId, isWin, score);
+            }
+        }
+    }
 }
 
 function diffuserChangementTour(salon, numTour) {
@@ -474,12 +489,14 @@ function diffuserEtatGlobal(salon) {
 }
 
 function getListeSalonsData() {
-    return Object.values(salons).map(s => ({
-        id: s.id,
-        nom: s.nom,
-        nbJoueurs: Object.keys(s.joueurs).length,
-        enCours: s.enCours
-    }));
+    return Object.values(salons)
+        .filter(s => !s.id.startsWith('solo_'))
+        .map(s => ({
+            id: s.id,
+            nom: s.nom,
+            nbJoueurs: Object.keys(s.joueurs).length,
+            enCours: s.enCours
+        }));
 }
 
 function envoyerMiseAJourSalon(salon) {
@@ -565,16 +582,145 @@ io.on('connection', (socket) => {
 
     
     socket.on('setProfil', (data) => {
-        profilsJoueurs[socket.id] = { pseudo: data.pseudo, avatar: data.avatar };
+        profilsJoueurs[socket.id] = { pseudo: data.pseudo, avatar: data.avatar, dbId: data.dbId || null };
         const salon = getSalonPourSocket(socket.id);
         if (salon) {
             envoyerMiseAJourSalon(salon);
             diffuserEtatGlobal(salon);
         }
     });
+
+    socket.on('auth:register', (data) => {
+        db.registerUser(data.username, data.password, data.avatar || '👤', (res) => {
+            if (res.error) socket.emit('auth:error', res.error);
+            else socket.emit('auth:success', res);
+        });
+    });
+
+    socket.on('auth:login', (data) => {
+        db.loginUser(data.username, data.password, (res) => {
+            if (res.error) socket.emit('auth:error', res.error);
+            else socket.emit('auth:success', res);
+        });
+    });
+
+    socket.on('auth:guest', (data) => {
+        const guestName = "Invité_" + Math.floor(Math.random() * 10000);
+        socket.emit('auth:success', { success: true, userId: null, username: guestName, avatar: '👤', stats: { jouees: 0, gagnees: 0, meilleurScore: 0 } });
+    });
     
     socket.on('listerSalons', () => {
         socket.emit('listeSalons', getListeSalonsData());
+    });
+
+    socket.on('getLeaderboard', () => {
+        db.getLeaderboard((rows) => {
+            socket.emit('leaderboardData', rows);
+        });
+    });
+
+    socket.on('demandePartieTuto', () => {
+        quitterLeSalon(socket.id);
+        const nomSalon = "Tutoriel";
+        const idSalon = 'tuto_' + socket.id;
+        
+        salons[idSalon] = {
+            id: idSalon,
+            nom: nomSalon,
+            hote: socket.id,
+            joueurs: {},
+            placesDisponibles: [2, 3, 4],
+            enCours: false,
+            partie: null,
+            bots: {},
+            spectateurs: new Set(),
+            messages: []
+        };
+        
+        const salon = salons[idSalon];
+        salon.joueurs[socket.id] = 1;
+        joueursDansSalons[socket.id] = idSalon;
+        
+        salon.enCours = true;
+        salon.partie = new PartieCanasta();
+
+        while (salon.placesDisponibles.length > 0) {
+            let num = salon.placesDisponibles.shift();
+            let botId = 'bot-' + num + '-' + Date.now();
+            salon.joueurs[botId] = num;
+            salon.bots[num] = new BotJoueur(num, salon, io);
+        }
+        salon.partie.demarrerNouvellePartie();
+        
+        // Rig the hand for Player 1: Give them 3 Kings so they can lock a group
+        let mainJ1 = salon.partie.joueurs[1].main;
+        mainJ1.splice(0, 6); // Remove 6 random cards
+        mainJ1.push({id: 'R_Coeur_Tuto', valeur: 'R', enseigne: 'Coeur', points: 10, type: 'naturelle'});
+        mainJ1.push({id: 'R_Pique_Tuto', valeur: 'R', enseigne: 'Pique', points: 10, type: 'naturelle'});
+        mainJ1.push({id: 'R_Carreau_Tuto', valeur: 'R', enseigne: 'Carreau', points: 10, type: 'naturelle'});
+        mainJ1.push({id: 'A_Coeur_Tuto', valeur: 'A', enseigne: 'Coeur', points: 20, type: 'naturelle'});
+        mainJ1.push({id: 'A_Pique_Tuto', valeur: 'A', enseigne: 'Pique', points: 20, type: 'naturelle'});
+        mainJ1.push({id: 'A_Carreau_Tuto', valeur: 'A', enseigne: 'Carreau', points: 20, type: 'naturelle'});
+        
+        socket.emit('lancementJeu', salon.id);
+        socket.join(salon.id);
+        
+        setTimeout(() => {
+            diffuserEtatGlobal(salon);
+            diffuserChangementTour(salon, salon.partie.tourActuel);
+            verifierTourBot(salon, salon.partie.tourActuel);
+        }, 500);
+    });
+
+    socket.on('demandePartieSolo', () => {
+        quitterLeSalon(socket.id);
+        const nomSalon = "Partie Solo";
+        const idSalon = 'solo_' + socket.id;
+        
+        salons[idSalon] = {
+            id: idSalon,
+            nom: nomSalon,
+            hote: socket.id,
+            joueurs: {},
+            placesDisponibles: [2, 3, 4],
+            enCours: false,
+            partie: null,
+            bots: {},
+            spectateurs: new Set(),
+            messages: []
+        };
+        
+        const salon = salons[idSalon];
+        salon.joueurs[socket.id] = 1;
+        joueursDansSalons[socket.id] = idSalon;
+        
+        // Ajouter les bots instantanément
+        while (salon.placesDisponibles.length > 0) {
+            let num = salon.placesDisponibles.shift();
+            let botId = `bot-${num}-${Date.now()}`;
+            salon.joueurs[botId] = num;
+        }
+
+        salon.enCours = true;
+        salon.partie = new PartieCanasta();
+        
+        for (let sId in salon.joueurs) {
+            if (sId.startsWith('bot-')) {
+                let num = salon.joueurs[sId];
+                salon.bots[num] = new BotJoueur(num, salon, io);
+            }
+        }
+
+        salon.partie.demarrerNouvellePartie();
+        
+        socket.emit('lancementJeu', salon.id);
+        socket.join(salon.id);
+        
+        setTimeout(() => {
+            diffuserEtatGlobal(salon);
+            diffuserChangementTour(salon, salon.partie.tourActuel);
+            verifierTourBot(salon, salon.partie.tourActuel);
+        }, 500); // Petite pause pour s'assurer que le client a switché d'écran
     });
 
     socket.on('creerSalon', (nomSalon) => {
@@ -758,6 +904,29 @@ io.on('connection', (socket) => {
         } else {
             socket.emit('alerteJeu', resultat.erreur);
             socket.emit('miseAJourEtat', salon.partie.getEtatPourJoueur(numeroJoueur));
+        }
+    });
+
+    
+    socket.on('demandeTricheTutoRamasser', () => {
+        const salon = getSalonPourSocket(socket.id);
+        if (!salon || !salon.partie) return;
+        let p = salon.partie;
+        if (p.defausse.length > 0) {
+            let topCard = p.defausse[p.defausse.length - 1];
+            if (topCard.estJoker || topCard.est3Noir || topCard.est3Rouge || topCard.valeur === '2') {
+                topCard.valeur = '9';
+                topCard.couleur = 'Coeur';
+                topCard.points = 10;
+                topCard.estJoker = false;
+                topCard.est3Noir = false;
+                topCard.est3Rouge = false;
+                topCard.estWildcardGenerique = false;
+            }
+            let main = p.joueurs[1].main;
+            main.push({ id: 'triche_1_' + Date.now(), valeur: topCard.valeur, couleur: topCard.couleur, points: topCard.points });
+            main.push({ id: 'triche_2_' + Date.now() + 'x', valeur: topCard.valeur, couleur: topCard.couleur, points: topCard.points });
+            diffuserEtatGlobal(salon);
         }
     });
 

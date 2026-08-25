@@ -67,6 +67,7 @@ class GestionnaireSons {
 
 const sons = new GestionnaireSons();
 const socket = io();
+window.socket = socket;
 
 // =============================================================================
 // ÉTAT GLOBAL
@@ -76,6 +77,7 @@ let monNumero = null;
 let estSpectateur = false;
 let cartesRecemmentPiochees = new Set();
 let cartesSelectionnees = new Set();
+let groupesVerrouillesLocaux = []; // Tableau d'objets { cartesId: [] }
 let etatGlobal = null;
 let localHandOrder = []; // Stores card IDs in user-sorted order
 
@@ -88,10 +90,13 @@ let verrouAction = false;
 // UTILITAIRES UI
 // =============================================================================
 function afficherEcran(idEcran) {
-    document.getElementById('ecran-lobby').style.display = 'none';
-    document.getElementById('ecran-salon').style.display = 'none';
-    document.getElementById('ecran-jeu').style.display = 'none';
-    document.getElementById(`ecran-${idEcran}`).style.display = 'flex';
+    const screens = ['login', 'menu-principal', 'lobby', 'salon', 'jeu'];
+    screens.forEach(s => {
+        const el = document.getElementById(`ecran-${s}`);
+        if (el) el.style.display = 'none';
+    });
+    const target = document.getElementById(`ecran-${idEcran}`);
+    if (target) target.style.display = 'flex';
     ecranActuel = idEcran;
     
     if (idEcran === 'jeu' && screen.orientation && screen.orientation.lock) {
@@ -307,41 +312,83 @@ function autoGroupCartes(ids, extraCard = null) {
     if (extraCard) selected.push(extraCard);
     
     let groups = [];
-    let groupMap = {}; 
-    let lastModifiedGroup = null;
-    let orphanWildcards = [];
+    let activeGroup = null;
+    let orphanWildcards = []; // Cartes en attente de groupe (Joker ou 2)
 
     for (let c of selected) {
-        if (c.valeur === 'Joker' || c.valeur === '2') {
-            if (lastModifiedGroup) {
-                lastModifiedGroup.cartesId.push(c.id);
+        // Règle de clôture : Si le groupe actif a déjà >= 3 cartes et qu'on sélectionne
+        // une carte d'une AUTRE valeur (y compris un 2 ou Joker), on ferme ce groupe
+        // pour que la nouvelle carte commence un nouveau groupe (ou devienne orpheline).
+        if (activeGroup && activeGroup.cartesId.length >= 3 && c.valeur !== activeGroup.valeur) {
+            activeGroup = null;
+        }
+
+        if (c.valeur === 'Joker') {
+            // Un Joker est toujours un wildcard
+            if (activeGroup) {
+                activeGroup.cartesId.push(c.id);
             } else {
                 orphanWildcards.push(c);
             }
-        } else {
-            if (!groupMap[c.valeur]) {
-                let newGroup = { valeur: c.valeur, cartesId: [] };
-                groups.push(newGroup);
-                groupMap[c.valeur] = newGroup;
+        } else if (c.valeur === '2') {
+            // Un 2 peut être un wildcard ou former un groupe naturel de 2
+            if (activeGroup) {
+                // Si le groupe actif est déjà un groupe de 2, c'est naturel
+                if (activeGroup.valeur === '2') {
+                    activeGroup.cartesId.push(c.id);
+                } else {
+                    // Sinon, c'est un wildcard pour ce groupe actif
+                    activeGroup.cartesId.push(c.id);
+                }
+            } else {
+                // Pas de groupe actif. Regardons s'il y a déjà un '2' dans les orphelins.
+                let indexOrphan2 = orphanWildcards.findIndex(w => w.valeur === '2');
+                if (indexOrphan2 !== -1) {
+                    // On a trouvé un '2' orphelin ! Ils forment un groupe naturel de 2.
+                    let prev2 = orphanWildcards.splice(indexOrphan2, 1)[0];
+                    let newGroup = { valeur: '2', cartesId: [prev2.id, c.id] };
+                    groups.push(newGroup);
+                    activeGroup = newGroup;
+                    
+                    // Si d'autres orphelins (Jokers) attendaient, ils rejoignent ce groupe
+                    if (orphanWildcards.length > 0) {
+                        orphanWildcards.forEach(w => activeGroup.cartesId.push(w.id));
+                        orphanWildcards = [];
+                    }
+                } else {
+                    // C'est le premier '2', il devient orphelin en attente
+                    orphanWildcards.push(c);
+                }
             }
-            groupMap[c.valeur].cartesId.push(c.id);
-            lastModifiedGroup = groupMap[c.valeur];
-            
-            // Absorb any orphan wildcards clicked before this natural card
-            if (orphanWildcards.length > 0) {
-                orphanWildcards.forEach(w => lastModifiedGroup.cartesId.push(w.id));
-                orphanWildcards = [];
+        } else {
+            // Carte naturelle (3 à As)
+            if (activeGroup && activeGroup.valeur === c.valeur) {
+                // On continue le groupe actif
+                activeGroup.cartesId.push(c.id);
+            } else {
+                // On démarre un NOUVEAU groupe naturel
+                // IMPORTANT: le fait de changer de valeur crée une distinction visuelle (nouveau groupe)
+                let newGroup = { valeur: c.valeur, cartesId: [c.id] };
+                groups.push(newGroup);
+                activeGroup = newGroup;
+                
+                // Absorber les orphelins (cliqués juste avant cette nouvelle carte)
+                if (orphanWildcards.length > 0) {
+                    orphanWildcards.forEach(w => activeGroup.cartesId.push(w.id));
+                    orphanWildcards = [];
+                }
             }
         }
     }
     
-    // If there are still orphan wildcards at the end
+    // S'il reste des orphelins à la fin, on les place dans leur propre groupe (ou le dernier actif)
     if (orphanWildcards.length > 0) {
-        if (groups.length > 0) {
-            orphanWildcards.forEach(w => groups[0].cartesId.push(w.id));
+        if (activeGroup) {
+            orphanWildcards.forEach(w => activeGroup.cartesId.push(w.id));
         } else {
-            let wildGroup = { valeur: '2', cartesId: orphanWildcards.map(w => w.id) };
-            groups.push(wildGroup);
+            // S'il n'y a eu que des jokers ou des 2 isolés
+            let fallbackVal = orphanWildcards.some(w => w.valeur === '2') ? '2' : 'Joker';
+            groups.push({ valeur: fallbackVal, cartesId: orphanWildcards.map(w => w.id) });
         }
     }
     
@@ -412,7 +459,13 @@ function trierMainIntelligent(main) {
 }
 
 function evaluerSelection() {
-    if (cartesSelectionnees.size === 0) return { valide: false };
+    const totalSelected = cartesSelectionnees.size + groupesVerrouillesLocaux.reduce((acc, arr) => acc + arr.length, 0);
+    if (totalSelected === 0) return { valide: false };
+    
+    // Si on a des groupes verrouillés, ce n'est pas un simple "ajout" direct, c'est forcément 'nouveau' (pose de groupes)
+    if (groupesVerrouillesLocaux.length > 0) {
+        return { valide: true, type: 'nouveau' };
+    }
     
     let selectedCartes = [];
     cartesSelectionnees.forEach(id => {
@@ -487,24 +540,54 @@ if (btnJeterElem) {
     });
 }
 
+document.getElementById('btn-lock').addEventListener('click', () => {
+    if (cartesSelectionnees.size >= 3) {
+        const arrayIds = Array.from(cartesSelectionnees);
+        const grouped = autoGroupCartes(arrayIds);
+        
+        grouped.forEach(g => {
+            if (g.cartesId.length > 0) {
+                groupesVerrouillesLocaux.push(g.cartesId);
+            }
+        });
+        
+        cartesSelectionnees.clear();
+        sons.jouer('select');
+        mettreAJourBoutons();
+    }
+});
+
 document.getElementById('btn-poser').addEventListener('click', () => {
     const eval = evaluerSelection();
     if (!eval.valide) return;
     
-    const arrayIds = Array.from(cartesSelectionnees);
-    
     if (eval.type === 'ajout') {
         // Ajout direct sans préparation
+        const arrayIds = Array.from(cartesSelectionnees);
         socket.emit('demandeDescendreCombinaison', [{ valeur: eval.valeur, cleUnique: eval.cleUnique, cartesId: arrayIds }]);
         cartesSelectionnees.clear();
         sons.jouer('succes');
         return;
     }
 
-    let grouped = autoGroupCartes(arrayIds);
+    let grouped = [];
+    
+    // 1. Process locked groups directly
+    groupesVerrouillesLocaux.forEach(arr => {
+        let res = autoGroupCartes(arr);
+        grouped = grouped.concat(res);
+    });
+    
+    // 2. Process remaining active selection
+    if (cartesSelectionnees.size > 0) {
+        const arrayIds = Array.from(cartesSelectionnees);
+        let res = autoGroupCartes(arrayIds);
+        grouped = grouped.concat(res);
+    }
+    
     grouped = grouped.filter(g => g.cartesId.length >= 3);
     if (grouped.length === 0) {
-        toast("Sélection invalide. 3 cartes minimum.", "error");
+        toast("Sélection invalide. 3 cartes minimum par groupe.", "error");
         sons.jouer('erreur');
         return;
     }
@@ -531,6 +614,7 @@ document.getElementById('btn-poser').addEventListener('click', () => {
     });
     
     cartesSelectionnees.clear();
+    groupesVerrouillesLocaux = [];
     sons.jouer('select');
     rendreMelds(etatGlobal.equipes[etatGlobal.monEquipe], 'melds-equipe');
     rendreMain(etatGlobal.maMain); // Update hand visually
@@ -694,16 +778,30 @@ function colorSelectedGroups() {
         el.classList.remove('sel-group-1', 'sel-group-2', 'sel-group-3', 'sel-group-4', 'sel-group-5');
     });
 
+    let globalGroupIndex = 0;
+    
+    // 1. Color locked groups
+    groupesVerrouillesLocaux.forEach(lockedArr => {
+        const colorClass = `sel-group-${(globalGroupIndex % 5) + 1}`;
+        lockedArr.forEach(id => {
+            const el = document.querySelector(`.card[data-id="${id}"]`);
+            if (el) el.classList.add(colorClass);
+        });
+        globalGroupIndex++;
+    });
+
+    // 2. Color active selection using autoGroupCartes
     if (cartesSelectionnees.size > 0) {
         const arrayIds = Array.from(cartesSelectionnees);
         const groups = autoGroupCartes(arrayIds);
         
-        groups.forEach((g, index) => {
-            const colorClass = `sel-group-${(index % 5) + 1}`;
+        groups.forEach((g) => {
+            const colorClass = `sel-group-${(globalGroupIndex % 5) + 1}`;
             g.cartesId.forEach(id => {
                 const el = document.querySelector(`.card[data-id="${id}"]`);
                 if (el) el.classList.add(colorClass);
             });
+            globalGroupIndex++;
         });
     }
 }
@@ -762,6 +860,8 @@ function mettreAJourBoutons() {
     const btnJeter = document.getElementById('btn-jeter');
 
     if (groupesPrepares.length > 0) {
+        const btnLock = document.getElementById('btn-lock');
+        if (btnLock) btnLock.style.display = 'none';
         if (btnPoser) btnPoser.style.display = 'none';
         if (btnJeter) btnJeter.style.display = 'none';
         if (btnValider) btnValider.style.display = modeErreurPreparation ? 'none' : 'flex';
@@ -793,6 +893,15 @@ function mettreAJourBoutons() {
                 btnPoser.style.opacity = '0.5';
             }
         }
+        const btnLock = document.getElementById('btn-lock');
+        if (btnLock) {
+            if (cartesSelectionnees.size >= 3) {
+                btnLock.style.display = 'block';
+            } else {
+                btnLock.style.display = 'none';
+            }
+        }
+        
         if (btnValider) btnValider.style.display = 'none';
         if (btnAnnuler) btnAnnuler.style.display = 'none';
     }
@@ -818,7 +927,17 @@ function onCarteTap(carte, element) {
         return;
     }
 
-    if (cartesSelectionnees.has(carte.id)) {
+    // Check if it's in a locked group
+    let lockedGroupIndex = groupesVerrouillesLocaux.findIndex(arr => arr.includes(carte.id));
+    if (lockedGroupIndex !== -1) {
+        // Unlock it
+        groupesVerrouillesLocaux[lockedGroupIndex] = groupesVerrouillesLocaux[lockedGroupIndex].filter(id => id !== carte.id);
+        // Remove group if empty
+        if (groupesVerrouillesLocaux[lockedGroupIndex].length === 0) {
+            groupesVerrouillesLocaux.splice(lockedGroupIndex, 1);
+        }
+        element.classList.remove('selectionnee');
+    } else if (cartesSelectionnees.has(carte.id)) {
         cartesSelectionnees.delete(carte.id);
         element.classList.remove('selectionnee');
     } else {
@@ -900,7 +1019,8 @@ function rendreMain(mainCartes) {
         el.className = `card ${getCardClass(c)}`;
         el.dataset.id = c.id;
         if (isWildcard) el.classList.add('wildcard-draggable');
-        if (cartesSelectionnees.has(c.id)) el.classList.add('selectionnee');
+        const isSelected = cartesSelectionnees.has(c.id) || groupesVerrouillesLocaux.some(arr => arr.includes(c.id));
+        if (isSelected) el.classList.add('selectionnee');
         el.innerHTML = generateCardHTML(c);
         if (cartesRecemmentPiochees.has(c.id)) {
             el.classList.add('nouvelle-carte-piochee');
@@ -1047,7 +1167,7 @@ function rendreMelds(equipeData, conteneurId) {
             let typeCanasta = 'open';
             let isPure = false;
             if (combi.cartes.length >= 7) {
-                isPure = !combi.cartes.some(c => c.valeur === 'Joker' || c.valeur === '2');
+                isPure = !combi.cartes.some(c => c.valeur === 'Joker' || (c.valeur === '2' && combi.valeur !== '2'));
                 typeCanasta = 'closed ' + (isPure ? 'pure' : 'mixed');
             }
             let isHighlight = false;
@@ -1196,15 +1316,6 @@ function rendreMelds(equipeData, conteneurId) {
     canastaListDiv.appendChild(ghost);
     
     conteneur.appendChild(canastaListDiv);
-    
-    if (equipeData) {
-        conteneur.style.position = 'relative';
-        const floatScore = document.createElement('div');
-        floatScore.className = 'meld-score-float';
-        floatScore.style = `position:absolute; bottom:8px; right:8px; color:${color}; font-size:18px; font-weight:900; text-shadow:0 0 12px ${color}50, 0 2px 6px rgba(0,0,0,0.8); pointer-events:none; z-index:20; background:rgba(0,0,0,0.4); padding:2px 8px; border-radius:8px; backdrop-filter:blur(4px);`;
-        floatScore.textContent = equipeData.score;
-        conteneur.appendChild(floatScore);
-    }
 }
 
 function rendreAdversaires(etat) {
@@ -1277,6 +1388,12 @@ function rendreScoresEtTour(etat) {
 
     const pEq = document.getElementById('progression-eq'); if(pEq) pEq.style.width = pctEquipe + '%';
     const pAdv = document.getElementById('progression-adv'); if(pAdv) pAdv.style.width = pctAdversaire + '%';
+    
+    // Update external score panels
+    const scoreNous = document.getElementById('score-nous');
+    const scoreEux = document.getElementById('score-eux');
+    if (scoreNous) scoreNous.textContent = dataMonEq.score || 0;
+    if (scoreEux) scoreEux.textContent = dataAutreEq.score || 0;
     
     mettreAJourIndicateurTour();
 }
@@ -1414,12 +1531,15 @@ socket.on('miseAJourEtat', (etat) => {
     if (etat.enJeu && ecranActuel !== 'jeu') {
         afficherEcran('jeu');
         cartesSelectionnees.clear();
+        window.statsMisesAJour = false;
     }
     if (etat.monNumero) monNumero = etat.monNumero;
 
+    // Toujours réinitialiser les groupes préparés sauf en cas d'erreur active
     if (!modeErreurPreparation) {
         groupesPrepares = [];
     }
+    modeErreurPreparation = false;
 
     if (etat.maMain) rendreMain(etat.maMain);
 
@@ -1453,6 +1573,8 @@ socket.on('miseAJourEtat', (etat) => {
     if (etat.partieTerminee) {
         afficherVictoire(etat.vainqueur, etat.equipes);
     }
+    // Trigger tutorial tooltip positioning
+    if (typeof showTutoStep === 'function') showTutoStep();
 });
 
 // Modals
@@ -1515,6 +1637,9 @@ function afficherVictoire(vainqueur, equipes) {
     document.getElementById('modal-overlay').style.display = 'flex';
     document.getElementById('modal-victoire').style.display = 'block';
     sons.jouer('victoire');
+    if (vainqueur === etatGlobal.monEquipe && typeof confetti === 'function') {
+        confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 } });
+    }
     
     const txt = document.getElementById('texte-victoire');
     if (vainqueur === etatGlobal.monEquipe) {
@@ -1524,13 +1649,27 @@ function afficherVictoire(vainqueur, equipes) {
         txt.innerHTML = `Dommage... L'équipe adverse gagne avec ${equipes[vainqueur].score} points.`;
         txt.style.color = "var(--red)";
     }
+    
+    // Update stats in localStorage
+    if (!window.statsMisesAJour) {
+        window.statsMisesAJour = true; // Prevent double trigger
+        let stats = JSON.parse(localStorage.getItem('canastaStats') || '{"jouees":0, "gagnees":0, "meilleurScore":0}');
+        stats.jouees++;
+        if (vainqueur === etatGlobal.monEquipe) stats.gagnees++;
+        if (equipes[etatGlobal.monEquipe].score > stats.meilleurScore) {
+            stats.meilleurScore = equipes[etatGlobal.monEquipe].score;
+        }
+        localStorage.setItem('canastaStats', JSON.stringify(stats));
+        mettreAJourStatsUI();
+    }
 }
 
 document.getElementById('btn-retour-lobby').addEventListener('click', () => {
+    localStorage.removeItem('canastaTutoEtape');
     document.getElementById('modal-victoire').style.display = 'none';
     document.getElementById('modal-overlay').style.display = 'none';
     socket.emit('quitterSalon');
-    afficherEcran('lobby');
+    afficherEcran('menu-principal');
 });
 
 socket.on('questionSortie', () => {
@@ -1568,26 +1707,90 @@ socket.on('connect', () => {
         localStorage.setItem('canastaToken', token);
     }
     
-    let pseudo = document.getElementById('input-pseudo') ? document.getElementById('input-pseudo').value : 'Joueur';
-    if (!pseudo.trim()) pseudo = 'Joueur';
+    let pseudo = localStorage.getItem('canastaPseudo');
+    if (!pseudo) {
+        pseudo = document.getElementById('input-pseudo') ? document.getElementById('input-pseudo').value : 'Joueur';
+        if (!pseudo.trim()) pseudo = 'Joueur';
+    }
     
     localStorage.setItem('canastaPseudo', pseudo);
     
-    socket.emit('setProfil', { pseudo, avatar: currentAvatar, token });
+    socket.emit('setProfil', { pseudo, avatar: currentAvatar, token, dbId: localStorage.getItem('canastaAuthToken') });
     
     const oldId = localStorage.getItem('canastaSessionId');
     if (token) {
         socket.emit('tentativeReconnexion', token);
     }
     localStorage.setItem('canastaSessionId', socket.id);
+    
+    // Après reconnexion, toujours rafraîchir l'état si on est en jeu
+    if (ecranActuel === 'jeu') {
+        setTimeout(() => socket.emit('demandeRafraichissement'), 1000);
+    }
 });
 
 // Send updated profile when creating a room
 document.getElementById('btn-creer-salon').addEventListener('click', () => {
-    const pseudo = document.getElementById('input-pseudo').value.trim() || 'Joueur';
-    localStorage.setItem('canastaPseudo', pseudo);
+    const pseudo = localStorage.getItem('canastaPseudo') || 'Joueur';
     const token = localStorage.getItem('canastaToken');
-    socket.emit('setProfil', { pseudo, avatar: currentAvatar, token });
+    socket.emit('setProfil', { pseudo, avatar: currentAvatar, token, dbId: localStorage.getItem('canastaAuthToken') });
+});
+
+// LOGIN & MENU ACTIONS
+// NEW AUTH UI ACTIONS
+document.getElementById('btn-show-login').addEventListener('click', () => {
+    document.getElementById('auth-main-options').style.display = 'none';
+    document.getElementById('auth-login-form').style.display = 'flex';
+});
+document.getElementById('btn-show-register').addEventListener('click', () => {
+    document.getElementById('auth-main-options').style.display = 'none';
+    document.getElementById('auth-register-form').style.display = 'flex';
+});
+document.querySelectorAll('.btn-retour-auth').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.getElementById('auth-login-form').style.display = 'none';
+        document.getElementById('auth-register-form').style.display = 'none';
+        document.getElementById('auth-main-options').style.display = 'flex';
+    });
+});
+
+document.getElementById('btn-do-login').addEventListener('click', () => {
+    const username = document.getElementById('login-username').value.trim();
+    const password = document.getElementById('login-password').value;
+    if (!username || !password) return toast("Remplissez tous les champs", "error");
+    socket.emit('auth:login', { username, password });
+});
+
+document.getElementById('btn-do-register').addEventListener('click', () => {
+    const username = document.getElementById('register-username').value.trim();
+    const password = document.getElementById('register-password').value;
+    if (!username || !password) return toast("Remplissez tous les champs", "error");
+    socket.emit('auth:register', { username, password, avatar: currentAvatar });
+});
+
+document.getElementById('btn-auth-guest').addEventListener('click', () => {
+    socket.emit('auth:guest');
+});
+
+document.getElementById('btn-menu-solo').addEventListener('click', () => {
+    localStorage.removeItem('canastaTutoEtape');
+    socket.emit('demandePartieSolo');
+    toast("Création de la partie...", "info");
+});
+
+document.getElementById('btn-menu-multi').addEventListener('click', () => {
+    localStorage.removeItem('canastaTutoEtape');
+    afficherEcran('lobby');
+});
+
+document.getElementById('btn-menu-tuto').addEventListener('click', () => {
+    socket.emit('demandePartieTuto');
+    localStorage.setItem('canastaTutoEtape', '1');
+    toast("Lancement du tutoriel...", "info");
+});
+
+document.getElementById('btn-lobby-retour').addEventListener('click', () => {
+    afficherEcran('menu-principal');
 });
 
 // Update the disconnected events visually
@@ -1625,8 +1828,15 @@ document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
         if (!socket.connected) {
             socket.connect();
-        } else if (ecranActuel === 'jeu') {
-            socket.emit('demandeRafraichissement');
+        }
+        // Toujours tenter un rafraîchissement quand on revient sur le jeu
+        // La connexion peut être stale même si socket.connected est true
+        if (ecranActuel === 'jeu') {
+            setTimeout(() => {
+                if (socket.connected) {
+                    socket.emit('demandeRafraichissement');
+                }
+            }, 500);
         }
     }
 });
@@ -1636,7 +1846,12 @@ let currentAvatar = '👤';
 document.addEventListener('DOMContentLoaded', () => {
     // Restore profile
     const savedPseudo = localStorage.getItem('canastaPseudo');
-    if (savedPseudo) document.getElementById('input-pseudo').value = savedPseudo;
+    if (savedPseudo) {
+        const loginEl = document.getElementById('login-username');
+        const regEl = document.getElementById('register-username');
+        if (loginEl) loginEl.value = savedPseudo;
+        if (regEl) regEl.value = savedPseudo;
+    }
     
     const savedAvatar = localStorage.getItem('canastaAvatar');
     if (savedAvatar) currentAvatar = savedAvatar;
@@ -1789,6 +2004,7 @@ if(btnFermerParam) {
 const btnQuitterJeu = document.getElementById('btn-quitter-jeu');
 if(btnQuitterJeu) {
     btnQuitterJeu.addEventListener('click', () => {
+        localStorage.removeItem('canastaTutoEtape');
         socket.emit('quitterSalon');
         window.location.reload();
     });
@@ -1840,3 +2056,131 @@ animerCarte(source, dest, cls, innerHTML);
         }
     }
 });
+
+function mettreAJourStatsUI() {
+    let stats = JSON.parse(localStorage.getItem('canastaStats') || '{"jouees":0, "gagnees":0, "meilleurScore":0, "xp":0}');
+    const elG = document.getElementById('stat-gagnees');
+    const elJ = document.getElementById('stat-jouees');
+    const elR = document.getElementById('stat-record');
+    if (elG) elG.textContent = stats.gagnees || 0;
+    if (elJ) elJ.textContent = stats.jouees || 0;
+    if (elR) elR.textContent = stats.meilleurScore || 0;
+    
+    if (stats.xp !== undefined && document.getElementById('barre-xp')) {
+        const niveau = calculerNiveau(stats.xp);
+        document.getElementById('texte-niveau').textContent = "Niveau " + niveau;
+        document.getElementById('texte-xp').textContent = stats.xp + " XP";
+        
+        const xpPrecedent = niveau === 1 ? 0 : Math.pow((niveau-1)*10, 2);
+        const xpSuivant = Math.pow(niveau*10, 2);
+        const progress = ((stats.xp - xpPrecedent) / (xpSuivant - xpPrecedent)) * 100;
+        
+        document.getElementById('barre-xp').style.width = Math.max(0, Math.min(progress, 100)) + "%";
+    }
+}document.addEventListener('DOMContentLoaded', mettreAJourStatsUI);
+
+socket.on('auth:success', (res) => {
+    if (res.userId) {
+        localStorage.setItem('canastaAuthToken', res.userId); // Simplified for this prototype
+    } else {
+        localStorage.removeItem('canastaAuthToken'); // Guest
+    }
+    
+    const pseudo = res.username;
+    localStorage.setItem('canastaPseudo', pseudo);
+    currentAvatar = res.avatar;
+    localStorage.setItem('canastaAvatar', currentAvatar);
+    
+    // Save DB ID in profilsJoueurs via setProfil
+    socket.emit('setProfil', { pseudo, avatar: currentAvatar, token: localStorage.getItem('canastaToken'), dbId: res.userId });
+    
+    // Set stats in localStorage temporarily for UI
+    if (res.stats) {
+        localStorage.setItem('canastaStats', JSON.stringify(res.stats));
+    } else {
+        localStorage.setItem('canastaStats', '{"jouees":0, "gagnees":0, "meilleurScore":0}');
+    }
+    
+    document.getElementById('menu-display-pseudo').textContent = pseudo;
+    document.getElementById('menu-display-avatar').textContent = currentAvatar;
+    
+    mettreAJourStatsUI();
+    afficherEcran('menu-principal');
+    toast(`Bienvenue ${pseudo} !`, 'success');
+});
+
+socket.on('auth:error', (msg) => {
+    toast(msg, 'error');
+});
+
+// LEADERBOARD & XP LOGIC
+function calculerNiveau(xp) {
+    return Math.floor(Math.sqrt(xp) / 10) + 1;
+}
+
+function getXpPourNiveauSuivant(niveau) {
+    return Math.pow((niveau) * 10, 2); // To go from level N to N+1
+}
+
+document.getElementById('btn-menu-classement').addEventListener('click', () => {
+    socket.emit('getLeaderboard');
+    document.getElementById('modal-classement').style.display = 'flex';
+});
+
+document.getElementById('btn-fermer-classement').addEventListener('click', () => {
+    document.getElementById('modal-classement').style.display = 'none';
+});
+
+socket.on('leaderboardData', (rows) => {
+    const listEl = document.getElementById('liste-classement');
+    listEl.innerHTML = '';
+    if (!rows || rows.length === 0) {
+        listEl.innerHTML = '<div style="color:white; text-align:center;">Aucun joueur classé pour le moment.</div>';
+        return;
+    }
+    
+    rows.forEach((row, index) => {
+        let badgeColor = '#555';
+        if (index === 0) badgeColor = '#ffd700'; // Gold
+        else if (index === 1) badgeColor = '#c0c0c0'; // Silver
+        else if (index === 2) badgeColor = '#cd7f32'; // Bronze
+        
+        const niveau = calculerNiveau(row.xp);
+        
+        listEl.innerHTML += `<div style="display:flex; align-items:center; background:rgba(0,0,0,0.3); padding:10px; border-radius:12px; gap:10px;">
+            <div style="width:30px; height:30px; border-radius:50%; background:${badgeColor}; color:white; display:flex; justify-content:center; align-items:center; font-weight:bold;">${index + 1}</div>
+            <div style="font-size:1.8rem;">${row.avatar || '🐤'}</div>
+            <div style="flex-grow:1;">
+                <div style="color:white; font-weight:bold;">${row.username}</div>
+                <div style="color:var(--gold); font-size:0.8rem;">Niv ${niveau} • ${row.xp} XP</div>
+            </div>
+            <div style="text-align:right;">
+                <div style="color:var(--green); font-size:0.9rem; font-weight:bold;">${row.best_score} pts</div>
+                <div style="color:#aaa; font-size:0.8rem;">${row.games_won} V.</div>
+            </div>
+        </div>`;
+    });
+});
+
+
+// REGLES LOGIC
+const modalRegles = document.getElementById('modal-regles');
+const btnMenuRegles = document.getElementById('btn-menu-regles');
+const btnParamRegles = document.getElementById('btn-param-regles');
+const btnFermerRegles = document.getElementById('btn-fermer-regles');
+
+if (btnMenuRegles) {
+    btnMenuRegles.addEventListener('click', () => {
+        modalRegles.style.display = 'flex';
+    });
+}
+if (btnParamRegles) {
+    btnParamRegles.addEventListener('click', () => {
+        modalRegles.style.display = 'flex';
+    });
+}
+if (btnFermerRegles) {
+    btnFermerRegles.addEventListener('click', () => {
+        modalRegles.style.display = 'none';
+    });
+}
