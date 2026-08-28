@@ -370,7 +370,9 @@ class BotJoueur {
                 } else if (main.length > 0) {
                     jeterId = main[0].id;
                 }
-             if (jeterId) {
+            }
+            
+            if (jeterId) {
                 // Délai avant de jeter la carte (fin du tour)
                 await new Promise(r => setTimeout(r, 1000 + Math.random() * 500));
                 
@@ -392,32 +394,10 @@ class BotJoueur {
                         diffuserEtatGlobal(this.salon);
                         verifierTourBot(this.salon, resJeter.prochainTour);
                     }
-                    return; // Succès, on quitte la fonction
                 }
             }
-            
-            // ANTI-BLOCAGE : Si le bot arrive ici, c'est qu'il n'a pas pu jeter (ex: il lui reste 1 carte mais son équipe ne peut pas sortir)
-            console.log("CRITICAL: Bot " + this.numero + " bloqué ! Impossible de jeter. Passage forcé au tour suivant.");
-            partie.aJoueCeTour = false; // Réinitialise l'état du joueur pour le prochain tour
-            const prochain = (numero % 4) + 1;
-            partie.tourActuel = prochain;
-            diffuserChangementTour(this.salon, prochain);
-            diffuserEtatGlobal(this.salon);
-            verifierTourBot(this.salon, prochain);
-
-        } catch (err) { 
-            console.error("BOT ERROR: ", err); 
-            // ANTI-BLOCAGE EXTRÊME : Si une erreur JS inattendue se produit, on force le changement de tour
-            if (this.partie) {
-                this.partie.aJoueCeTour = false;
-                const prochain = (this.numero % 4) + 1;
-                this.partie.tourActuel = prochain;
-                diffuserChangementTour(this.salon, prochain);
-                diffuserEtatGlobal(this.salon);
-                verifierTourBot(this.salon, prochain);
-            }
-        }
-        // Fin du tour du bot      // Fin du tour du bot
+        } catch (err) { console.error("BOT ERROR: ", err); }
+        // Fin du tour du bot
     }
 }
 
@@ -977,52 +957,40 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('demandeRamasserTerre', (...args) => {
-        try {
-            let groupesOuverture = args.length > 0 && Array.isArray(args[0]) ? args[0] : args;
-            const salon = getSalonPourSocket(socket.id);
-            if (!salon || !salon.partie) return;
-            let numeroJoueur = salon.joueurs[socket.id];
-            if (!numeroJoueur) return;
+    socket.on('demandeRamasserTerre', (groupesOuverture) => {
+        const salon = getSalonPourSocket(socket.id);
+        if (!salon || !salon.partie) return;
+        let numeroJoueur = salon.joueurs[socket.id];
+        if (!numeroJoueur) return;
 
-            let resultat = salon.partie.actionRamasserTerre(numeroJoueur, groupesOuverture);
+        let resultat = salon.partie.actionRamasserTerre(numeroJoueur, groupesOuverture);
 
-            if (resultat.ok) {
-                diffuserAlerte(salon, `Le Joueur ${numeroJoueur} a ramassé la terre (+1 carte piochée) !`);
-                diffuserEtatGlobal(salon);
-            } else {
-                socket.emit('alerteJeu', resultat.erreur);
-            }
-        } catch (err) {
-            console.error("Erreur demandeRamasserTerre:", err);
-            socket.emit('alerteJeu', "Erreur interne lors du ramassage de la terre.");
+        if (resultat.ok) {
+            diffuserAlerte(salon, `Le Joueur ${numeroJoueur} a ramassé la terre (+1 carte piochée) !`);
+            diffuserEtatGlobal(salon);
+        } else {
+            socket.emit('alerteJeu', resultat.erreur);
         }
     });
 
-    socket.on('demandeDescendreCombinaison', (...args) => {
-        try {
-            let groupesProposees = args.length > 0 && Array.isArray(args[0]) ? args[0] : args;
-            const salon = getSalonPourSocket(socket.id);
-            if (!salon || !salon.partie) return;
-            let numeroJoueur = salon.joueurs[socket.id];
-            if (!numeroJoueur) return;
+    socket.on('demandeDescendreCombinaison', (groupesProposees) => {
+        const salon = getSalonPourSocket(socket.id);
+        if (!salon || !salon.partie) return;
+        let numeroJoueur = salon.joueurs[socket.id];
+        if (!numeroJoueur) return;
 
-            let resultat = salon.partie.actionDescendreCombinaisons(numeroJoueur, groupesProposees);
-            if (resultat.ok) {
-                diffuserAnimation(salon, 'animationDescendre', numeroJoueur);
-                socket.emit('alerteJeu', "Combinaisons validées !");
-                if (resultat.mancheTerminee) {
-                    envoyerMiseAJourSalon(salon);
-                    gererFinManche(salon, resultat);
-                } else {
-                    diffuserEtatGlobal(salon);
-                }
+        let resultat = salon.partie.actionDescendreCombinaisons(numeroJoueur, groupesProposees);
+        if (resultat.ok) {
+            diffuserAnimation(salon, 'animationDescendre', numeroJoueur);
+            socket.emit('alerteJeu', "Combinaisons validées !");
+            if (resultat.mancheTerminee) {
+                envoyerMiseAJourSalon(salon);
+                gererFinManche(salon, resultat);
             } else {
-                socket.emit('alerteJeu', resultat.erreur);
+                diffuserEtatGlobal(salon);
             }
-        } catch (err) {
-            console.error("Erreur demandeDescendreCombinaison:", err);
-            socket.emit('alerteJeu', "Erreur interne lors de la descente des combinaisons.");
+        } else {
+            socket.emit('alerteJeu', resultat.erreur);
         }
     });
 
