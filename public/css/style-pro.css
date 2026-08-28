@@ -1,4 +1,20 @@
 
+/* Améliorations tactiles (Mobile & WebApp) */
+* {
+    touch-action: manipulation !important;
+    -webkit-tap-highlight-color: transparent !important;
+}
+body {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+}
+input, textarea, .chat-messages {
+    -webkit-user-select: auto;
+    user-select: auto;
+}
+
+
   :root{
     --felt-1:#1c9e5c;
     --felt-2:#0d6238;

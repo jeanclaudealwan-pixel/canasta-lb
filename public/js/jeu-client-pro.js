@@ -1784,9 +1784,10 @@ document.getElementById('btn-menu-multi').addEventListener('click', () => {
 });
 
 document.getElementById('btn-menu-tuto').addEventListener('click', () => {
-    socket.emit('demandePartieTuto');
-    localStorage.setItem('canastaTutoEtape', '1');
-    toast("Lancement du tutoriel...", "info");
+    toast("Bientôt disponible ! Le tutoriel est en cours d'amélioration.", "info");
+    // socket.emit('demandePartieTuto');
+    // localStorage.setItem('canastaTutoEtape', '1');
+    // toast("Lancement du tutoriel...", "info");
 });
 
 document.getElementById('btn-lobby-retour').addEventListener('click', () => {
