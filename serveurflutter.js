@@ -370,7 +370,9 @@ class BotJoueur {
                 } else if (main.length > 0) {
                     jeterId = main[0].id;
                 }
-             if (jeterId) {
+            }
+            
+            if (jeterId) {
                 // Délai avant de jeter la carte (fin du tour)
                 await new Promise(r => setTimeout(r, 1000 + Math.random() * 500));
                 
@@ -392,19 +394,8 @@ class BotJoueur {
                         diffuserEtatGlobal(this.salon);
                         verifierTourBot(this.salon, resJeter.prochainTour);
                     }
-                    return; // Succès, on quitte la fonction
                 }
             }
-            
-            // ANTI-BLOCAGE : Si le bot arrive ici, c'est qu'il n'a pas pu jeter (ex: il lui reste 1 carte mais son équipe ne peut pas sortir)
-            console.log("CRITICAL: Bot " + this.numero + " bloqué ! Impossible de jeter. Passage forcé au tour suivant.");
-            partie.aJoueCeTour = false; // Réinitialise l'état du joueur pour le prochain tour
-            const prochain = (numero % 4) + 1;
-            partie.tourActuel = prochain;
-            diffuserChangementTour(this.salon, prochain);
-            diffuserEtatGlobal(this.salon);
-            verifierTourBot(this.salon, prochain);
-
         } catch (err) { 
             console.error("BOT ERROR: ", err); 
             // ANTI-BLOCAGE EXTRÊME : Si une erreur JS inattendue se produit, on force le changement de tour
@@ -417,7 +408,7 @@ class BotJoueur {
                 verifierTourBot(this.salon, prochain);
             }
         }
-        // Fin du tour du bot      // Fin du tour du bot
+        // Fin du tour du bot
     }
 }
 
