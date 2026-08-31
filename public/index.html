@@ -411,6 +411,22 @@
             <p id="texte-victoire"></p>
             <button id="btn-retour-lobby" class="btn btn-gold">Retour au Lobby</button>
         </div>
+        <div id="modal-reconnexion" class="modal-panel" style="display:none; text-align: center;">
+            <h2 style="color: var(--gold); margin-bottom: 20px;">⚡ Partie en cours !</h2>
+            <p id="texte-reconnexion" style="margin-bottom: 20px;">Vous avez été déconnecté. Voulez-vous reprendre votre place ?</p>
+            <div class="modal-btns">
+                <button id="btn-accepter-reconnexion" class="btn btn-large" style="background: var(--green); color: white; border: 2px solid white; border-radius: 12px; font-weight: bold;">Reprendre la partie</button>
+                <button id="btn-refuser-reconnexion" class="btn btn-large" style="background: transparent; color: white; border: 1px solid white; border-radius: 12px; font-weight: bold;">Ignorer</button>
+            </div>
+        </div>
+        <div id="modal-vote" class="modal-panel" style="display:none; text-align: center;">
+            <h2 id="titre-vote" style="color: var(--red); margin-bottom: 20px;">Déconnexion</h2>
+            <p id="texte-vote" style="margin-bottom: 20px;">Le joueur a été déconnecté. Que voulez-vous faire ?</p>
+            <div class="modal-btns" style="flex-direction: column; gap: 10px;">
+                <button id="btn-vote-attendre" class="btn btn-large" style="background: var(--blue); color: white; border-radius: 12px; font-weight: bold;">⏳ Attendre (Pause)</button>
+                <button id="btn-vote-bot" class="btn btn-large" style="background: var(--gold); color: black; border-radius: 12px; font-weight: bold;">🤖 Remplacer par un Bot</button>
+            </div>
+        </div>
     </div>
     <div id="toast-container"></div>
 </body>

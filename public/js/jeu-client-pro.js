@@ -73,10 +73,12 @@ window.socket = socket;
 // ÉTAT GLOBAL
 // =============================================================================
 let ecranActuel = 'lobby'; // lobby | salon | jeu
-let monNumero = null;
+let monNumero = 1; // 1, 2, 3 ou 4
 let estSpectateur = false;
 let cartesRecemmentPiochees = new Set();
 let cartesSelectionnees = new Set();
+let terreSelectionnee = false;
+let groupesPrepares = []; // Tableau d'objets { cartesId: [], cartes: [] }
 let groupesVerrouillesLocaux = []; // Tableau d'objets { cartesId: [] }
 let etatGlobal = null;
 let localHandOrder = []; // Stores card IDs in user-sorted order
@@ -101,6 +103,13 @@ function afficherEcran(idEcran) {
     
     if (idEcran === 'jeu' && screen.orientation && screen.orientation.lock) {
         screen.orientation.lock('landscape').catch(e => console.log('Orientation lock not supported', e));
+    }
+    
+    // Vérifier si le joueur a une partie en cours qu'il peut reprendre
+    if (idEcran === 'menu-principal' || idEcran === 'lobby') {
+        if (typeof socket !== 'undefined' && socket) {
+            socket.emit('verifierReconnexion');
+        }
     }
 }
 
@@ -311,6 +320,12 @@ function autoGroupCartes(ids, extraCard = null) {
     let selected = ids.map(id => etatGlobal.maMain.find(c => c.id === id)).filter(Boolean);
     if (extraCard) selected.push(extraCard);
     
+    // NOUVEAU : on trie toujours les cartes par valeur pour que les cartes identiques 
+    // (ex: les 10 de la main et le 10 de la terre) soient toujours côte à côte, 
+    // peu importe l'ordre dans lequel le joueur a cliqué.
+    const ordreVal = { '3': 1, '4': 2, '5': 3, '6': 4, '7': 5, '8': 6, '9': 7, '10': 8, 'V': 9, 'D': 10, 'R': 11, 'A': 12, '2': 13, 'Joker': 14 };
+    selected.sort((a, b) => (ordreVal[a.valeur] || 0) - (ordreVal[b.valeur] || 0));
+    
     let groups = [];
     let activeGroup = null;
     let orphanWildcards = []; // Cartes en attente de groupe (Joker ou 2)
@@ -459,8 +474,14 @@ function trierMainIntelligent(main) {
 }
 
 function evaluerSelection() {
-    const totalSelected = cartesSelectionnees.size + groupesVerrouillesLocaux.reduce((acc, arr) => acc + arr.length, 0);
+    const totalSelected = cartesSelectionnees.size + groupesVerrouillesLocaux.reduce((acc, arr) => acc + arr.length, 0) + (terreSelectionnee ? 1 : 0);
     if (totalSelected === 0) return { valide: false };
+    
+    // Si la terre est sélectionnée OU qu'on n'a pas encore joué, on ne peut pas "ajouter" 
+    // directement à une combinaison existante sur la table. Il faut FORCÉMENT préparer.
+    if (terreSelectionnee || (etatGlobal && !etatGlobal.aJoueCeTour)) {
+        return { valide: true, type: 'nouveau' };
+    }
     
     // Si on a des groupes verrouillés, ce n'est pas un simple "ajout" direct, c'est forcément 'nouveau' (pose de groupes)
     if (groupesVerrouillesLocaux.length > 0) {
@@ -523,7 +544,7 @@ function evaluerSelection() {
     return { valide: false };
 }
 
-let groupesPrepares = [];
+// groupesPrepares est déjà déclaré au début du fichier
 let modeErreurPreparation = false;
 
 const btnJeterElem = document.getElementById('btn-jeter');
@@ -579,9 +600,13 @@ document.getElementById('btn-poser').addEventListener('click', () => {
     });
     
     // 2. Process remaining active selection
-    if (cartesSelectionnees.size > 0) {
+    if (cartesSelectionnees.size > 0 || terreSelectionnee) {
         const arrayIds = Array.from(cartesSelectionnees);
-        let res = autoGroupCartes(arrayIds);
+        let extraCard = null;
+        if (terreSelectionnee && etatGlobal.carteDessusDefausse) {
+            extraCard = etatGlobal.carteDessusDefausse;
+        }
+        let res = autoGroupCartes(arrayIds, extraCard);
         grouped = grouped.concat(res);
     }
     
@@ -592,9 +617,23 @@ document.getElementById('btn-poser').addEventListener('click', () => {
         return;
     }
     
+    // Si l'équipe a déjà ouvert et qu'on ne ramasse pas la terre, on pose directement
+    const monEq = etatGlobal.equipes[etatGlobal.monEquipe];
+    if (monEq && monEq.aOuvert && !terreSelectionnee) {
+        socket.emit('demandeDescendreCombinaison', grouped);
+        cartesSelectionnees.clear();
+        groupesVerrouillesLocaux = [];
+        sons.jouer('succes');
+        return;
+    }
+    
     // Récolter uniquement les IDs des groupes valides
     let validIds = new Set();
-    grouped.forEach(g => g.cartesId.forEach(id => validIds.add(id)));
+    grouped.forEach(g => g.cartesId.forEach(id => {
+        if (!etatGlobal.carteDessusDefausse || id !== etatGlobal.carteDessusDefausse.id) {
+            validIds.add(id);
+        }
+    }));
 
     // Déplacer les cartes vers la zone de préparation localement
     const cartesDeplacees = [];
@@ -607,11 +646,25 @@ document.getElementById('btn-poser').addEventListener('click', () => {
     });
     
     grouped.forEach(g => {
+        let cartesDuGroupe = g.cartesId.map(id => {
+            if (etatGlobal.carteDessusDefausse && id === etatGlobal.carteDessusDefausse.id) return etatGlobal.carteDessusDefausse;
+            return cartesDeplacees.find(c => c.id === id);
+        }).filter(Boolean);
+        
         groupesPrepares.push({
             cartesId: g.cartesId,
-            cartes: g.cartesId.map(id => cartesDeplacees.find(c => c.id === id)).filter(Boolean)
+            cartes: cartesDuGroupe
         });
     });
+    
+    if (terreSelectionnee) {
+        terreSelectionnee = false;
+        const terreEl = document.getElementById('terre');
+        if (terreEl) {
+            terreEl.style.boxShadow = 'none';
+            terreEl.style.transform = 'none';
+        }
+    }
     
     cartesSelectionnees.clear();
     groupesVerrouillesLocaux = [];
@@ -650,6 +703,14 @@ document.getElementById('btn-annuler-pose').addEventListener('click', () => {
     });
     groupesPrepares = [];
     modeErreurPreparation = false;
+    
+    terreSelectionnee = false;
+    const terreEl = document.getElementById('terre');
+    if (terreEl) {
+        terreEl.style.boxShadow = 'none';
+        terreEl.style.transform = 'none';
+    }
+    
     rendreMelds(etatGlobal.equipes[etatGlobal.monEquipe], 'melds-equipe');
     rendreMain(etatGlobal.maMain);
     mettreAJourBoutons();
@@ -691,58 +752,18 @@ document.getElementById('terre').addEventListener('click', () => {
 
     if (!etatGlobal.carteDessusDefausse) return;
     
-    const aDejaTerre = groupesPrepares.some(g => g.cartesId.includes(etatGlobal.carteDessusDefausse.id));
-    if (aDejaTerre) {
-        toast("Vous avez déjà préparé la carte de la terre. Utilisez 'Poser' pour d'autres cartes.", "info");
-        return;
+    // NOUVELLE LOGIQUE : on sélectionne juste la terre visuellement !
+    terreSelectionnee = !terreSelectionnee;
+    const terreEl = document.getElementById('terre');
+    if (terreSelectionnee) {
+        terreEl.style.boxShadow = '0 0 10px 4px var(--green)';
+        terreEl.style.transform = 'translateY(-10px)';
+        sons.jouer('select');
+    } else {
+        terreEl.style.boxShadow = 'none';
+        terreEl.style.transform = 'none';
+        sons.jouer('select');
     }
-
-    const arrayIds = Array.from(cartesSelectionnees);
-    
-    if (arrayIds.length === 0) {
-        toast("Sélectionnez 2 cartes de votre main pour préparer la prise de la terre.", "info");
-        return;
-    }
-
-    let grouped = autoGroupCartes(arrayIds, etatGlobal.carteDessusDefausse);
-    grouped = grouped.filter(g => g.cartesId.length >= 3);
-    
-    if (grouped.length === 0) {
-        toast("Sélection invalide pour prendre la terre.", "error");
-        sons.jouer('erreur');
-        return;
-    }
-
-    // Récolter uniquement les IDs des groupes valides (excluant la terre pour ne pas la chercher dans la main)
-    let validIds = new Set();
-    grouped.forEach(g => g.cartesId.forEach(id => {
-        if (id !== etatGlobal.carteDessusDefausse.id) validIds.add(id);
-    }));
-
-    // Déplacer les cartes vers la zone de préparation localement
-    const cartesDeplacees = [];
-    validIds.forEach(id => {
-        const idx = etatGlobal.maMain.findIndex(c => c.id === id);
-        if (idx !== -1) {
-            cartesDeplacees.push(etatGlobal.maMain[idx]);
-            etatGlobal.maMain.splice(idx, 1);
-        }
-    });
-
-    // Ajouter la terre visuellement
-    cartesDeplacees.push(etatGlobal.carteDessusDefausse);
-    
-    grouped.forEach(g => {
-        groupesPrepares.push({
-            cartesId: g.cartesId, 
-            cartes: g.cartesId.map(id => cartesDeplacees.find(c => c.id === id)).filter(Boolean)
-        });
-    });
-    
-    cartesSelectionnees.clear();
-    sons.jouer('select');
-    rendreMelds(etatGlobal.equipes[etatGlobal.monEquipe], 'melds-equipe');
-    rendreMain(etatGlobal.maMain);
     mettreAJourBoutons();
 });
 
@@ -915,17 +936,6 @@ function onCarteTap(carte, element) {
     const last = dernierTap[carte.id] || 0;
     dernierTap[carte.id] = now;
     const estMonTour = etatGlobal && etatGlobal.tourActuel === monNumero;
-
-    if (now - last < DOUBLE_TAP_MS && estMonTour) {
-        // Double tap = Jeter la carte
-        verrouAction = true;
-        socket.emit('demandeJouerCarte', carte.id);
-        sons.jouer('jeter');
-        cartesSelectionnees.delete(carte.id);
-        element.classList.remove('selectionnee');
-        setTimeout(() => verrouAction = false, 1000);
-        return;
-    }
 
     // Check if it's in a locked group
     let lockedGroupIndex = groupesVerrouillesLocaux.findIndex(arr => arr.includes(carte.id));
@@ -1158,7 +1168,8 @@ function rendreMelds(equipeData, conteneurId) {
             if (labelLeft) labelLeft.appendChild(bonus);
         }
 
-        const valeursTriees = Object.keys(equipeData.table).sort((a,b) => a - b);
+        const ordreValTable = { '3': 1, '4': 2, '5': 3, '6': 4, '7': 5, '8': 6, '9': 7, '10': 8, 'V': 9, 'D': 10, 'R': 11, 'A': 12, '2': 13 };
+        const valeursTriees = Object.keys(equipeData.table).sort((a,b) => (ordreValTable[a] || 0) - (ordreValTable[b] || 0));
         valeursTriees.forEach(val => {
             const combi = equipeData.table[val];
             const canastaDiv = document.createElement('div');
@@ -1558,19 +1569,22 @@ socket.on('miseAJourEtat', (etat) => {
     if (etat.tailleMains) rendreAdversaires(etat);
     mettreAJourBoutons();
 
-    // Check for recap
-    if (etat.dernierRecapManche && !etat.enJeu && !etat.partieTerminee) {
+    if (etat.dernierRecapManche && !etat.enJeu) {
         afficherRecap(etat.dernierRecapManche);
     } else if (etat.enJeu) {
         document.getElementById('modal-scores').style.display = 'none';
         // Only hide overlay if no other modal is showing
         if (document.getElementById('modal-sortie').style.display === 'none' && 
-            document.getElementById('modal-victoire').style.display === 'none') {
+            document.getElementById('modal-victoire').style.display === 'none' &&
+            document.getElementById('modal-vote').style.display === 'none' &&
+            document.getElementById('modal-reconnexion').style.display === 'none') {
             document.getElementById('modal-overlay').style.display = 'none';
         }
     }
     
-    if (etat.partieTerminee) {
+    // On ne lance afficherVictoire ici QUE si on n'a pas de recap à afficher, 
+    // sinon c'est le bouton "Continuer" du recap qui lancera la victoire.
+    if (etat.partieTerminee && !etat.dernierRecapManche) {
         afficherVictoire(etat.vainqueur, etat.equipes);
     }
     // Trigger tutorial tooltip positioning
@@ -1607,23 +1621,35 @@ function afficherRecap(recap) {
     }
     html += '</div>';
     const btn = document.getElementById('btn-fermer-scores');
-    // On vérifie d'abord window.idHoteActuel, ou bien on regarde dans etatGlobal si présent
-    const hoteActuel = window.idHoteActuel || (etatGlobal && etatGlobal.hote);
     
-    if (hoteActuel === socket.id) {
-        btn.textContent = 'Continuer ▶';
-        btn.style.background = 'var(--green)';
+    // Si la partie est terminée, tout le monde peut cliquer pour voir la victoire
+    if (etatGlobal && etatGlobal.partieTerminee) {
+        btn.textContent = 'Voir le Vainqueur !';
+        btn.style.background = 'var(--gold)';
         btn.disabled = false;
     } else {
-        btn.textContent = "Attente de l'hôte...";
-        btn.style.background = '#666';
-        btn.disabled = true;
+        const hoteActuel = window.idHoteActuel || (etatGlobal && etatGlobal.hote);
+        if (hoteActuel === socket.id) {
+            btn.textContent = 'Continuer ▶';
+            btn.style.background = 'var(--green)';
+            btn.disabled = false;
+        } else {
+            btn.textContent = "Attente de l'hôte...";
+            btn.style.background = '#666';
+            btn.disabled = true;
+        }
     }
 
     document.getElementById('contenu-scores').innerHTML = html;
 }
 
 document.getElementById('btn-fermer-scores').addEventListener('click', () => {
+    if (etatGlobal && etatGlobal.partieTerminee) {
+        document.getElementById('modal-scores').style.display = 'none';
+        afficherVictoire(etatGlobal.vainqueur, etatGlobal.equipes);
+        return;
+    }
+
     const hoteActuel = window.idHoteActuel || (etatGlobal && etatGlobal.hote);
     if (hoteActuel === socket.id) {
         socket.emit('demandeNouvelleManche');
@@ -1716,6 +1742,7 @@ socket.on('connect', () => {
     localStorage.setItem('canastaPseudo', pseudo);
     
     socket.emit('setProfil', { pseudo, avatar: currentAvatar, token, dbId: localStorage.getItem('canastaAuthToken') });
+    socket.emit('verifierReconnexion');
     
     const oldId = localStorage.getItem('canastaSessionId');
     if (token) {
@@ -1734,6 +1761,51 @@ document.getElementById('btn-creer-salon').addEventListener('click', () => {
     const pseudo = localStorage.getItem('canastaPseudo') || 'Joueur';
     const token = localStorage.getItem('canastaToken');
     socket.emit('setProfil', { pseudo, avatar: currentAvatar, token, dbId: localStorage.getItem('canastaAuthToken') });
+});
+
+// UI DYNAMIQUE POUR LE VOTE DE DÉCONNEXION
+socket.on('demandeVoteDeconnexion', (data) => {
+    document.getElementById('titre-vote').textContent = `Déconnexion de ${data.pseudo}`;
+    document.getElementById('texte-vote').textContent = `Le joueur ${data.pseudo} a été déconnecté (appel, perte de réseau...). Que voulez-vous faire ?`;
+    
+    document.getElementById('modal-overlay').style.display = 'flex';
+    document.getElementById('modal-vote').style.display = 'block';
+    
+    document.getElementById('btn-vote-attendre').onclick = () => {
+        socket.emit('soumettreVoteDeconnexion', { numeroJoueur: data.numeroJoueur, choix: 'attendre' });
+        document.getElementById('modal-vote').style.display = 'none';
+        document.getElementById('modal-overlay').style.display = 'none';
+        toast("Vote 'Attendre' envoyé.");
+    };
+    
+    document.getElementById('btn-vote-bot').onclick = () => {
+        socket.emit('soumettreVoteDeconnexion', { numeroJoueur: data.numeroJoueur, choix: 'bot' });
+        document.getElementById('modal-vote').style.display = 'none';
+        document.getElementById('modal-overlay').style.display = 'none';
+        toast("Vote 'Remplacer par un bot' envoyé.");
+    };
+});
+
+// UI DYNAMIQUE POUR LA RECONNEXION
+socket.on('reconnexionDisponible', (data) => {
+    // Si on est déjà dans le jeu, ignorer
+    if (document.getElementById('ecran-jeu').style.display === 'block') return;
+    
+    document.getElementById('texte-reconnexion').textContent = `Vous avez été déconnecté du salon "${data.nomSalon}". Voulez-vous reprendre votre place ?`;
+    document.getElementById('modal-overlay').style.display = 'flex';
+    document.getElementById('modal-reconnexion').style.display = 'block';
+    
+    document.getElementById('btn-accepter-reconnexion').onclick = () => {
+        socket.emit('rejoindrePartieDeconnectee');
+        document.getElementById('modal-reconnexion').style.display = 'none';
+        document.getElementById('modal-overlay').style.display = 'none';
+    };
+    
+    document.getElementById('btn-refuser-reconnexion').onclick = () => {
+        socket.emit('ignorerReconnexion', { nomSalon: data.nomSalon, idSalon: data.idSalon });
+        document.getElementById('modal-reconnexion').style.display = 'none';
+        document.getElementById('modal-overlay').style.display = 'none';
+    };
 });
 
 // LOGIN & MENU ACTIONS
@@ -2006,7 +2078,7 @@ const btnQuitterJeu = document.getElementById('btn-quitter-jeu');
 if(btnQuitterJeu) {
     btnQuitterJeu.addEventListener('click', () => {
         localStorage.removeItem('canastaTutoEtape');
-        socket.emit('quitterSalon');
+        socket.emit('quitterVolontaire');
         window.location.reload();
     });
 }

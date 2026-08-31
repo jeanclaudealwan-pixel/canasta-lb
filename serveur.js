@@ -34,11 +34,12 @@ class BotJoueur {
     }
     async jouerTour() { console.log("Bot jouerTour started for bot " + this.numero);
         try {
-        // Délai initial avant toute action (réflexion du bot)
-        await new Promise(r => setTimeout(r, 1200 + Math.random() * 800)); if (!this.partie || !this.partie.enJeu) return;
-        
-        const numero = this.numero;
-        const partie = this.partie;
+            // Délai initial avant toute action (réflexion du bot)
+            await new Promise(r => setTimeout(r, 1200 + Math.random() * 800)); 
+            if (!this.partie || !this.partie.enJeu || this.desactive) return;
+            
+            const numero = this.numero;
+            const partie = this.partie;
             let equipe = partie.equipes[partie.equipeDuJoueur(numero)];
             let main = partie.joueurs[numero].main;
             if (!equipe.aOuvert) {
@@ -59,23 +60,17 @@ class BotJoueur {
                 if (naturals.length >= nbRequis) {
                     let wantsToPickUp = true;
                     if (equipe.aOuvert) {
-                        // SCENARIO 3 : Ignorer les petites piles (<4) sauf si c'est très utile
                         if (partie.defausse.length <= 3) {
                             let meldLen = equipe.table[topTerre.valeur] ? equipe.table[topTerre.valeur].cartes.length : 0;
-                            // S'il a beaucoup de cartes et que ça ne fait pas une canasta directe, il l'ignore
-                            if (meldLen + naturals.length + 1 < 7 && main.length > 5) {
-                                wantsToPickUp = false;
-                            }
+                            if (meldLen + naturals.length + 1 < 7 && main.length > 5) wantsToPickUp = false;
                         }
                         if (wantsToPickUp) {
                             const res = partie.actionRamasserTerre(numero, null);
                             if (res.ok) ramasserOk = true;
                         }
                     } else {
-                        // Tenter d'ouvrir avec la terre (approche pure privilégiée)
                         let seuil = calculerSeuilOuverture(equipe.score);
                         let autoriserJoker = (this.toursSansOuverture >= 3 || seuil >= 90);
-                        
                         let pointsTotal = 0;
                         const valMap = {};
                         for (const c of main) {
@@ -109,12 +104,8 @@ class BotJoueur {
                             if (res.ok) {
                                 ramasserOk = true;
                                 let cartesAjoutees = [];
-                                groupesOuverture.forEach(g => {
-                                    if (g.cartesId) cartesAjoutees.push(...g.cartesId);
-                                });
-                                if (cartesAjoutees.length > 0) {
-                                    diffuserAnimation(this.salon, "animationDescendre", { numeroJoueur: numero, cartesAjoutees: cartesAjoutees });
-                                }
+                                groupesOuverture.forEach(g => { if (g.cartesId) cartesAjoutees.push(...g.cartesId); });
+                                if (cartesAjoutees.length > 0) diffuserAnimation(this.salon, "animationDescendre", { numeroJoueur: numero, cartesAjoutees: cartesAjoutees });
                             }
                         }
                     }
@@ -124,7 +115,6 @@ class BotJoueur {
             if (ramasserOk) {
                 diffuserEtatGlobal(this.salon);
             } else {
-                // 2. PIOCHER
                 const resPiocher = partie.actionPiocher(numero);
                 if (resPiocher.ok) {
                     if (resPiocher.piocheEpuisee) {
@@ -138,22 +128,18 @@ class BotJoueur {
                 }
             }
             
-            // Recharger l'état de la main et de l'équipe après pioche/ramassage
             main = partie.joueurs[numero].main;
             equipe = partie.equipes[partie.equipeDuJoueur(numero)];
             
-            const nextNum = (numero % 4) + 1;
+            const nextNum = numero === 1 ? 4 : numero - 1;
             const nextEquipeNum = partie.equipeDuJoueur(nextNum);
             const nextEquipe = partie.equipes[nextEquipeNum];
             
-            // 3. DESCENDRE COMBINAISONS
             let groupesDescendre = [];
             
             if (!equipe.aOuvert) {
-                // Tenter d'ouvrir de sa main
                 let seuil = calculerSeuilOuverture(equipe.score);
                 let autoriserJoker = (this.toursSansOuverture >= 3 || seuil >= 90);
-                
                 let pointsTotal = 0;
                 const valMap = {};
                 for (const c of main) {
@@ -176,15 +162,11 @@ class BotJoueur {
                         potentiels.push({ cartesId: [cartesV[0].id, cartesV[1].id, w.id] });
                     }
                 }
-                if (pointsTotal >= seuil) {
-                    groupesDescendre = potentiels;
-                }
+                if (pointsTotal >= seuil) groupesDescendre = potentiels;
             } else {
-                // Ajouter aux combinaisons existantes ou créer de nouvelles
                 const valMap = {};
                 let wildcards = main.filter(c => c.estJoker || c.valeur === '2');
                 let wIdx = 0;
-                
                 for (const c of main) {
                     if (!c.estJoker && c.valeur !== '2' && !c.est3Noir && c.valeur !== '3 Rouge') {
                         valMap[c.valeur] = valMap[c.valeur] || [];
@@ -197,38 +179,24 @@ class BotJoueur {
                     let existingCombo = null;
                     let cleUnique = null;
                     
-                    // Chercher une combinaison existante
                     for (const [key, combo] of Object.entries(equipe.table)) {
-                        if (combo.valeur === v && !combo.estCanasta) {
-                            existingCombo = combo; cleUnique = key; break;
-                        }
+                        if (combo.valeur === v && !combo.estCanasta) { existingCombo = combo; cleUnique = key; break; }
                     }
                     if (!existingCombo) {
                         for (const [key, combo] of Object.entries(equipe.table)) {
-                            if (combo.valeur === v) {
-                                existingCombo = combo; cleUnique = key; break;
-                            }
+                            if (combo.valeur === v) { existingCombo = combo; cleUnique = key; break; }
                         }
                     }
                     
                     if (existingCombo) {
-                        // Ajout de cartes naturelles
-                        if (cartesV.length > 0) {
-                            groupesDescendre.push({ valeur: cleUnique, cartesId: cartesV.map(c => c.id) });
-                        }
+                        if (cartesV.length > 0) groupesDescendre.push({ valeur: cleUnique, cartesId: cartesV.map(c => c.id) });
                     } else {
-                        // Nouveau groupe : On ne crée que des groupes purs de 3+ cartes !
-                        // On ne gaspille plus de Joker pour faire un groupe de 3 si on a déjà ouvert.
-                        if (cartesV.length >= 3) {
-                            groupesDescendre.push({ cartesId: cartesV.map(c => c.id) });
-                        }
+                        if (cartesV.length >= 3) groupesDescendre.push({ cartesId: cartesV.map(c => c.id) });
                     }
                 }
                 
-                // SCENARIO 1 : Gestion stratégique des jokers (Canastas Noires)
                 for (const [key, combo] of Object.entries(equipe.table)) {
                     if (combo.cartes.length >= 7) continue; 
-                    
                     let cartesEquipe = combo.cartes.filter(c => !c.estJoker && c.valeur !== '2').length;
                     let cartesAdversaire = 0;
                     for (const oppCombo of Object.values(nextEquipe.table)) {
@@ -240,8 +208,6 @@ class BotJoueur {
                     
                     let cartesManquantes = 7 - combo.cartes.length;
                     let canMakeCanastaInstantly = (wildcards.length - wIdx) >= cartesManquantes;
-                    // Si l'adversaire a déjà 5 cartes naturelles, il n'en reste que 7 dans le jeu (qui a 3 paquets de 4 = 12 cartes).
-                    // Faire une canasta pure devient quasiment impossible.
                     let pureIsImpossible = (cartesAdversaire >= 5); 
                     
                     if (canMakeCanastaInstantly || pureIsImpossible) {
@@ -255,7 +221,6 @@ class BotJoueur {
                             }
                             gAjout.cartesId.push(w.id);
                             nbWilds++;
-                            
                             let totalNow = combo.cartes.length + gAjout.cartesId.length;
                             if (totalNow >= 7) break;
                         }
@@ -263,7 +228,6 @@ class BotJoueur {
                 }
             }
             
-            // SCENARIO 4 : VÉRIFICATION SORTIE + TEMPORISATION
             let teamHasPure = false;
             let teamHasImpure = false;
             for (const combo of Object.values(equipe.table)) {
@@ -274,13 +238,9 @@ class BotJoueur {
                 }
             }
             let canGoOut = teamHasPure && teamHasImpure;
-            
             const partenaireNum = equipe.membres.find(m => m !== numero);
             const partenaireCartes = partie.joueurs[partenaireNum].main.length;
-            
-            if (canGoOut && partenaireCartes >= 5) {
-                canGoOut = false; // On temporise pour aider le partenaire
-            }
+            if (canGoOut && partenaireCartes >= 5) canGoOut = false; 
             
             if (!canGoOut) {
                 let currentUsed = 0;
@@ -306,12 +266,10 @@ class BotJoueur {
 
             if (groupesDescendre.length > 0) {
                 let cartesAjoutees = [];
-                groupesDescendre.forEach(g => {
-                    if (g.cartesId) cartesAjoutees.push(...g.cartesId);
-                });
+                groupesDescendre.forEach(g => { if (g.cartesId) cartesAjoutees.push(...g.cartesId); });
 
-                // Délai avant de descendre ses combinaisons pour que le joueur puisse suivre l'action
                 await new Promise(r => setTimeout(r, 1000 + Math.random() * 500));
+                if (this.desactive) return;
                 
                 const resDescendre = partie.actionDescendreCombinaisons(numero, groupesDescendre);
                 if (resDescendre.ok) {
@@ -325,60 +283,46 @@ class BotJoueur {
             }
             
             main = partie.joueurs[numero].main;
-            
-            console.log("Bot " + this.numero + " JETER"); // 4. JETER (Défensif, Geler la terre)
             const nextMelds = Object.values(nextEquipe.table).map(m => m.valeur);
             const lastDiscardedByNext = partie.dernieresCartesJetees ? partie.dernieresCartesJetees[nextNum] : null;
-            
             let jeterId = null;
             const black3s = main.filter(c => c.est3Noir);
             
-            // SCENARIO 2 : Analyse de la défausse pour voir si on doit geler
             let oppWantsPile = false;
-            if (partie.defausse.length >= 4) { // Terre volumineuse
+            if (partie.defausse.length >= 4) { 
                 for (let card of partie.defausse) {
                     if (!card.estJoker && card.valeur !== '2' && card.valeur !== '3') {
-                        if (nextMelds.includes(card.valeur)) {
-                            oppWantsPile = true; break;
-                        }
+                        if (nextMelds.includes(card.valeur)) { oppWantsPile = true; break; }
                     }
                 }
             }
             
-            // Cartes spéciales (Jokers/2) non utilisées dans la descente
             const usedInDescend = new Set();
             groupesDescendre.forEach(g => g.cartesId.forEach(id => usedInDescend.add(id)));
             const freeWildcards = main.filter(c => (c.estJoker || c.valeur === '2') && !usedInDescend.has(c.id));
 
             if (oppWantsPile && freeWildcards.length > 0) {
-                // SCENARIO 2 : On gèle la terre car elle est très dangereuse
                 jeterId = freeWildcards[0].id;
             } else if (black3s.length > 0) {
-                jeterId = black3s[0].id; // Toujours jeter les 3 noirs (très défensif classique)
+                jeterId = black3s[0].id;
             } else {
                 const normales = main.filter(c => !c.estJoker && c.valeur !== '2' && c.valeur !== '3 Rouge');
                 if (normales.length > 0) {
                     normales.sort((a,b) => a.points - b.points); 
-                    
                     const safeDiscards = normales.filter(c => nextMelds.includes(c.valeur) || c.valeur === lastDiscardedByNext);
-                    
-                    if (safeDiscards.length > 0) {
-                        jeterId = safeDiscards[0].id;
-                    } else {
-                        jeterId = normales[0].id; // Tant pis, on jette la plus petite
-                    }
+                    if (safeDiscards.length > 0) jeterId = safeDiscards[0].id;
+                    else jeterId = normales[0].id; 
                 } else if (main.length > 0) {
                     jeterId = main[0].id;
                 }
             }
             
             if (jeterId) {
-                // Délai avant de jeter la carte (fin du tour)
                 await new Promise(r => setTimeout(r, 1000 + Math.random() * 500));
+                if (this.desactive) return;
                 
-                 let resJeter = partie.actionJeter(numero, jeterId); 
+                let resJeter = partie.actionJeter(numero, jeterId); 
                 if (!resJeter.ok) {
-                    // Fallback absolu
                     for (let c of main) {
                         resJeter = partie.actionJeter(numero, c.id);
                         if (resJeter.ok) { jeterId = c.id; break; }
@@ -539,17 +483,58 @@ function quitterLeSalon(socketId) {
         let numeroLibere = salon.joueurs[socketId];
         
         if (salon.enCours) {
-            // Remplacer par un Bot immédiatement
-            delete salon.joueurs[socketId];
-            const sIdBot = 'bot-' + Date.now() + Math.floor(Math.random()*1000);
-            salon.joueurs[sIdBot] = numeroLibere;
-            salon.bots = salon.bots || {};
-            salon.bots[numeroLibere] = new BotJoueur(numeroLibere, salon, io);
-            diffuserMessageGlobal(salon, `Le Joueur ${numeroLibere} a quitté et a été remplacé par un Bot.`);
-            envoyerMiseAJourSalon(salon);
-            diffuserEtatGlobal(salon);
-            if (salon.partie.tourActuel === numeroLibere && !salon.partie.aJoueCeTour) {
-                salon.bots[numeroLibere].jouerTour();
+            let volontaire = salon.demandeQuitterVolontaire && salon.demandeQuitterVolontaire.has(socketId);
+            let profil = profilsJoueurs[socketId] || { pseudo: `Joueur ${numeroLibere}` };
+            
+            if (volontaire) {
+                // Abandon volontaire ! Remplacement immédiat par un bot sans vote, et pas de reconnexion
+                salon.demandeQuitterVolontaire.delete(socketId);
+                delete salon.joueurs[socketId];
+                
+                const sIdBot = 'bot-' + Date.now() + Math.floor(Math.random()*1000);
+                salon.joueurs[sIdBot] = numeroLibere;
+                salon.bots = salon.bots || {};
+                salon.bots[numeroLibere] = new BotJoueur(numeroLibere, salon, io);
+                
+                diffuserMessageGlobal(salon, `${profil.pseudo} a quitté volontairement la partie et a été remplacé(e) par un Bot.`);
+                envoyerMiseAJourSalon(salon);
+                diffuserEtatGlobal(salon);
+                
+                if (salon.partie && salon.partie.tourActuel === numeroLibere && !salon.partie.aJoueCeTour) {
+                    salon.bots[numeroLibere].jouerTour();
+                }
+            } else {
+                // Gérer la déconnexion avec un vote
+                salon.deconnexions = salon.deconnexions || {};
+                salon.deconnexions[numeroLibere] = {
+                    pseudo: profil.pseudo,
+                    avatar: profil.avatar,
+                    dbId: profil.dbId,
+                    token: profil.token,
+                    date: Date.now()
+                };
+                delete salon.joueurs[socketId]; // Libère le socket
+                
+                salon.votesDeconnexion = salon.votesDeconnexion || {};
+                salon.votesDeconnexion[numeroLibere] = {
+                    attendre: 0,
+                    bot: 0,
+                    votants: []
+                };
+                
+                diffuserMessageGlobal(salon, `${profil.pseudo} s'est déconnecté(e) (connexion perdue).`);
+                
+                // Envoyer la demande de vote aux autres joueurs humains
+                for (let sId in salon.joueurs) {
+                    if (!sId.startsWith('bot-')) {
+                        io.to(sId).emit('demandeVoteDeconnexion', {
+                            numeroJoueur: numeroLibere,
+                            pseudo: profil.pseudo
+                        });
+                    }
+                }
+                envoyerMiseAJourSalon(salon);
+                diffuserEtatGlobal(salon);
             }
         } else {
             salon.placesDisponibles.push(numeroLibere);
@@ -582,11 +567,121 @@ io.on('connection', (socket) => {
 
     
     socket.on('setProfil', (data) => {
-        profilsJoueurs[socket.id] = { pseudo: data.pseudo, avatar: data.avatar, dbId: data.dbId || null };
+        profilsJoueurs[socket.id] = { pseudo: data.pseudo, avatar: data.avatar, dbId: data.dbId || null, token: data.token };
         const salon = getSalonPourSocket(socket.id);
         if (salon) {
             envoyerMiseAJourSalon(salon);
             diffuserEtatGlobal(salon);
+        }
+    });
+
+    socket.on('verifierReconnexion', () => {
+        const profil = profilsJoueurs[socket.id];
+        if (!profil) return;
+        for (let id in salons) {
+            let salon = salons[id];
+            if (salon.deconnexions) {
+                for (let num in salon.deconnexions) {
+                    let d = salon.deconnexions[num];
+                    if ((profil.token && d.token === profil.token) || (profil.dbId && d.dbId === profil.dbId) || (d.pseudo === profil.pseudo)) {
+                        socket.emit('reconnexionDisponible', { nomSalon: salon.nom, idSalon: salon.id });
+                        return;
+                    }
+                }
+            }
+        }
+    });
+
+    socket.on('rejoindrePartieDeconnectee', () => {
+        const profil = profilsJoueurs[socket.id];
+        if (!profil) return;
+        
+        for (let id in salons) {
+            let salon = salons[id];
+            if (salon.deconnexions) {
+                for (let num in salon.deconnexions) {
+                    let d = salon.deconnexions[num];
+                    if ((profil.token && d.token === profil.token) || (profil.dbId && d.dbId === profil.dbId) || (d.pseudo === profil.pseudo)) {
+                        // Reconnect !
+                        let numeroLibere = parseInt(num);
+                        salon.joueurs[socket.id] = numeroLibere;
+                        joueursDansSalons[socket.id] = salon.id;
+                        delete salon.deconnexions[num];
+                        
+                        // S'il y a un bot qui avait pris sa place, on le vire
+                        let botId = Object.keys(salon.joueurs).find(s => s.startsWith('bot-') && salon.joueurs[s] === numeroLibere);
+                        if (botId) {
+                            delete salon.joueurs[botId];
+                            if (salon.bots && salon.bots[numeroLibere]) {
+                                salon.bots[numeroLibere].desactive = true; // Empêche le bot de continuer s'il est au milieu d'un tour
+                                delete salon.bots[numeroLibere];
+                            }
+                            diffuserMessageGlobal(salon, `${profil.pseudo} s'est reconnecté(e) et a repris sa place !`);
+                        } else {
+                            diffuserMessageGlobal(salon, `${profil.pseudo} s'est reconnecté(e) !`);
+                        }
+                        
+                        if (salon.enAttenteReconnexion === numeroLibere) {
+                            salon.enAttenteReconnexion = null;
+                        }
+                        
+                        envoyerMiseAJourSalon(salon);
+                        diffuserEtatGlobal(salon);
+                        
+                        // Check if they need to play right now
+                        if (salon.partie && salon.partie.tourActuel === numeroLibere && !salon.partie.aJoueCeTour) {
+                            socket.emit('alerteJeu', 'C\'est votre tour !');
+                        }
+                        return;
+                    }
+                }
+            }
+        }
+        socket.emit('alerteJeu', 'Aucune partie en attente trouvée ou le délai est écoulé.');
+    });
+
+    socket.on('ignorerReconnexion', () => {
+        const profil = profilsJoueurs[socket.id];
+        if (!profil) return;
+        
+        for (let id in salons) {
+            let salon = salons[id];
+            if (salon.deconnexions) {
+                for (let num in salon.deconnexions) {
+                    let d = salon.deconnexions[num];
+                    if ((profil.token && d.token === profil.token) || (profil.dbId && d.dbId === profil.dbId) || (d.pseudo === profil.pseudo)) {
+                        let numeroLibere = parseInt(num);
+                        delete salon.deconnexions[num];
+                        if (salon.enAttenteReconnexion === numeroLibere) {
+                            salon.enAttenteReconnexion = null;
+                            diffuserMessageGlobal(salon, `${profil.pseudo} a abandonné la partie. Remplacement par un Bot.`);
+                            const sIdBot = 'bot-' + Date.now() + Math.floor(Math.random()*1000);
+                            salon.joueurs[sIdBot] = numeroLibere;
+                            salon.bots = salon.bots || {};
+                            salon.bots[numeroLibere] = new BotJoueur(numeroLibere, salon, io);
+                            envoyerMiseAJourSalon(salon);
+                            diffuserEtatGlobal(salon);
+                            if (salon.partie && salon.partie.tourActuel === numeroLibere && !salon.partie.aJoueCeTour) {
+                                salon.bots[numeroLibere].jouerTour();
+                            }
+                        } else if (salon.votesDeconnexion && salon.votesDeconnexion[numeroLibere]) {
+                            // S'il n'y a pas encore eu de décision mais qu'il refuse de rejoindre
+                            delete salon.votesDeconnexion[numeroLibere];
+                            diffuserMessageGlobal(salon, `${profil.pseudo} a abandonné la partie. Remplacement par un Bot.`);
+                            const sIdBot = 'bot-' + Date.now() + Math.floor(Math.random()*1000);
+                            salon.joueurs[sIdBot] = numeroLibere;
+                            salon.bots = salon.bots || {};
+                            salon.bots[numeroLibere] = new BotJoueur(numeroLibere, salon, io);
+                            envoyerMiseAJourSalon(salon);
+                            diffuserEtatGlobal(salon);
+                            if (salon.partie && salon.partie.tourActuel === numeroLibere && !salon.partie.aJoueCeTour) {
+                                salon.bots[numeroLibere].jouerTour();
+                            }
+                        }
+                        return;
+                    }
+                }
+            }
         }
     });
 
@@ -609,6 +704,62 @@ io.on('connection', (socket) => {
         socket.emit('auth:success', { success: true, userId: null, username: guestName, avatar: '👤', stats: { jouees: 0, gagnees: 0, meilleurScore: 0 } });
     });
     
+    socket.on('soumettreVoteDeconnexion', (data) => {
+        const salon = getSalonPourSocket(socket.id);
+        if (!salon || !salon.votesDeconnexion || !salon.votesDeconnexion[data.numeroJoueur]) return;
+        
+        const voteSession = salon.votesDeconnexion[data.numeroJoueur];
+        if (voteSession.votants.includes(socket.id)) return; // Déjà voté
+        
+        voteSession.votants.push(socket.id);
+        if (data.choix === 'attendre') voteSession.attendre++;
+        else if (data.choix === 'bot') voteSession.bot++;
+        
+        let totalHumans = Object.keys(salon.joueurs).filter(id => !id.startsWith('bot-')).length;
+        let majority = Math.ceil(totalHumans / 2);
+        if (totalHumans === 0) majority = 0;
+        
+        if (voteSession.attendre >= majority || voteSession.bot >= majority || voteSession.votants.length >= totalHumans) {
+            let decision = (voteSession.bot >= voteSession.attendre) ? 'bot' : 'attendre';
+            delete salon.votesDeconnexion[data.numeroJoueur];
+            
+            if (decision === 'bot') {
+                diffuserMessageGlobal(salon, `Décision : ${data.numeroJoueur} est remplacé par un Bot.`);
+                const sIdBot = 'bot-' + Date.now() + Math.floor(Math.random()*1000);
+                salon.joueurs[sIdBot] = data.numeroJoueur;
+                salon.bots = salon.bots || {};
+                salon.bots[data.numeroJoueur] = new BotJoueur(data.numeroJoueur, salon, io);
+                envoyerMiseAJourSalon(salon);
+                diffuserEtatGlobal(salon);
+                if (salon.partie && salon.partie.tourActuel === data.numeroJoueur && !salon.partie.aJoueCeTour) {
+                    salon.bots[data.numeroJoueur].jouerTour();
+                }
+            } else {
+                diffuserMessageGlobal(salon, `Le jeu est en pause en attendant le joueur ${data.numeroJoueur}... (Remplacement auto dans 2 minutes)`);
+                salon.enAttenteReconnexion = data.numeroJoueur;
+                envoyerMiseAJourSalon(salon);
+                diffuserEtatGlobal(salon);
+                
+                // Timeout de 2 minutes
+                setTimeout(() => {
+                    if (salon && salon.enAttenteReconnexion === data.numeroJoueur) {
+                        diffuserMessageGlobal(salon, `Le temps d'attente est écoulé. Remplacement par un Bot.`);
+                        salon.enAttenteReconnexion = null;
+                        const sIdBot = 'bot-' + Date.now() + Math.floor(Math.random()*1000);
+                        salon.joueurs[sIdBot] = data.numeroJoueur;
+                        salon.bots = salon.bots || {};
+                        salon.bots[data.numeroJoueur] = new BotJoueur(data.numeroJoueur, salon, io);
+                        envoyerMiseAJourSalon(salon);
+                        diffuserEtatGlobal(salon);
+                        if (salon.partie && salon.partie.tourActuel === data.numeroJoueur && !salon.partie.aJoueCeTour) {
+                            salon.bots[data.numeroJoueur].jouerTour();
+                        }
+                    }
+                }, 120000); // 2 minutes
+            }
+        }
+    });
+
     socket.on('listerSalons', () => {
         socket.emit('listeSalons', getListeSalonsData());
     });
@@ -809,6 +960,15 @@ io.on('connection', (socket) => {
     socket.on('quitterSalon', () => {
         quitterLeSalon(socket.id);
         socket.emit('listeSalons', getListeSalonsData());
+    });
+
+    socket.on('quitterVolontaire', () => {
+        const salon = getSalonPourSocket(socket.id);
+        if (salon) {
+            salon.demandeQuitterVolontaire = salon.demandeQuitterVolontaire || new Set();
+            salon.demandeQuitterVolontaire.add(socket.id);
+        }
+        quitterLeSalon(socket.id);
     });
 
     

@@ -102,6 +102,7 @@ class PartieCanasta {
         this.distribuerCartes();
 
         this.tourActuel = premierJoueur || 1;
+        this.premierJoueurManche = this.tourActuel;
         this.enJeu = true;
     }
 
@@ -523,7 +524,9 @@ class PartieCanasta {
         }
 
         if (options.exigerPaireEtCarte && !contientPaireEtCarte) {
-            return { ok: false, erreur: "Une des combinaisons doit inclure la paire et la carte ramassée sur la défausse." };
+            const nbReq = options.exigerPaireEtCarte.cartesRequises.length;
+            const msgCartes = nbReq === 3 ? "les 3 cartes naturelles" : "la paire";
+            return { ok: false, erreur: `Une des combinaisons doit inclure ${msgCartes} de votre main et la carte ramassée sur la défausse.` };
         }
 
         if (options.verifierSeuil) {
@@ -614,7 +617,7 @@ class PartieCanasta {
         }
 
         this.sortieRefusee = {};
-        this.tourActuel = (this.tourActuel % 4) + 1;
+        this.tourActuel = this.tourActuel === 1 ? 4 : this.tourActuel - 1;
         return { ok: true, carteJetee: carte, mancheTerminee: false, prochainTour: this.tourActuel };
     }
 
@@ -689,7 +692,7 @@ class PartieCanasta {
             this.vainqueur = recap.equipes[1].scoreTotal >= recap.equipes[2].scoreTotal ? 1 : 2;
         } else {
             this.enJeu = false;
-            this.prochainPremierJoueur = numJoueurSorti ? (numJoueurSorti % 4) + 1 : (this.tourActuel % 4) + 1;
+            this.prochainPremierJoueur = this.premierJoueurManche === 1 ? 4 : this.premierJoueurManche - 1;
         }
 
         return recap;
@@ -772,8 +775,8 @@ function validerGroupeDeCartes(cartes) {
         return { valide: false, raison: 'Combinaison invalide.' };
     }
 
-    if (nbNaturelles <= nbWildcards) {
-        return { valide: false, raison: 'Il faut strictement plus de cartes naturelles que de Jokers/2 (règle d\'or).' };
+    if (nbNaturelles < nbWildcards) {
+        return { valide: false, raison: 'Il faut au moins autant de cartes naturelles que de Jokers/2 (règle d\'or).' };
     }
 
     const estPure = nbWildcards === 0;
