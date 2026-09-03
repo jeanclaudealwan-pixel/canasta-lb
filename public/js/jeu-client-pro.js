@@ -332,9 +332,10 @@ function autoGroupCartes(ids, extraCard = null) {
 
     for (let c of selected) {
         // Règle de clôture : Si le groupe actif a déjà >= 3 cartes et qu'on sélectionne
-        // une carte d'une AUTRE valeur (y compris un 2 ou Joker), on ferme ce groupe
-        // pour que la nouvelle carte commence un nouveau groupe (ou devienne orpheline).
-        if (activeGroup && activeGroup.cartesId.length >= 3 && c.valeur !== activeGroup.valeur) {
+        // une carte naturelle d'une AUTRE valeur, on ferme ce groupe pour que la nouvelle carte
+        // commence un nouveau groupe. On NE FERME PAS si la nouvelle carte est un Joker ou un 2.
+        const estWild = (c.valeur === 'Joker' || c.valeur === '2');
+        if (activeGroup && activeGroup.cartesId.length >= 3 && c.valeur !== activeGroup.valeur && !estWild) {
             activeGroup = null;
         }
 
