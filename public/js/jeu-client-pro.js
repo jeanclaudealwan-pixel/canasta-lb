@@ -620,7 +620,7 @@ document.getElementById('btn-poser').addEventListener('click', () => {
     // Si l'équipe a déjà ouvert et qu'on ne ramasse pas la terre, on pose directement
     const monEq = etatGlobal.equipes[etatGlobal.monEquipe];
     if (monEq && monEq.aOuvert && !terreSelectionnee) {
-        socket.emit('demandeDescendreCombinaison', grouped);
+        socket.emit('demandeDescendreCombinaison', grouped.map(g => ({ cartesId: g.cartesId })));
         cartesSelectionnees.clear();
         groupesVerrouillesLocaux = [];
         sons.jouer('succes');
