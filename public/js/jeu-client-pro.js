@@ -228,6 +228,12 @@ socket.on('alerteJeu', (msg) => {
     toast(msg, msg.includes('Erreur') || msg.includes('Impossible') || msg.includes('invalide') ? 'error' : 'info'); 
     sons.jouer('erreur'); 
     
+    cartesSelectionnees.clear();
+    groupesVerrouillesLocaux = [];
+    terreSelectionnee = false;
+    if (etatGlobal && etatGlobal.maMain) rendreMain(etatGlobal.maMain);
+    mettreAJourBoutons();
+
     // Check if this is a failed opening
     if (msg.includes("droit d'ouvrir")) {
         modeErreurPreparation = true;
@@ -302,6 +308,15 @@ socket.on('recevoirEmoji', (data) => {
 // =============================================================================
 // JEU : ACTIONS DE BOUTONS
 // =============================================================================
+
+function envoyerActionDeJeu(eventName, payload) {
+    if (verrouAction) return;
+    verrouAction = true;
+    socket.emit(eventName, payload, (resultat) => {
+        verrouAction = false;
+        if (resultat && resultat.ok === false) toast(resultat.erreur, 'error');
+    });
+}
 
 // Force text onto buttons in case index.html is cached with old emojis
 window.addEventListener('DOMContentLoaded', () => {
@@ -553,11 +568,9 @@ if (btnJeterElem) {
     btnJeterElem.addEventListener('click', () => {
         if (verrouAction || !etatGlobal || etatGlobal.tourActuel !== monNumero || !etatGlobal.aJoueCeTour) return;
         if (cartesSelectionnees.size === 1) {
-            verrouAction = true;
             const cardId = Array.from(cartesSelectionnees)[0];
-            socket.emit('demandeJouerCarte', cardId);
+            envoyerActionDeJeu('demandeJouerCarte', cardId);
             cartesSelectionnees.clear();
-            setTimeout(() => verrouAction = false, 1000);
         }
     });
 }
@@ -586,7 +599,7 @@ document.getElementById('btn-poser').addEventListener('click', () => {
     if (eval.type === 'ajout') {
         // Ajout direct sans préparation
         const arrayIds = Array.from(cartesSelectionnees);
-        socket.emit('demandeDescendreCombinaison', [{ valeur: eval.valeur, cleUnique: eval.cleUnique, cartesId: arrayIds }]);
+        envoyerActionDeJeu('demandeDescendreCombinaison', [{ valeur: eval.valeur, cleUnique: eval.cleUnique, cartesId: arrayIds }]);
         cartesSelectionnees.clear();
         sons.jouer('succes');
         return;
@@ -618,10 +631,10 @@ document.getElementById('btn-poser').addEventListener('click', () => {
         return;
     }
     
-    // Si l'équipe a déjà ouvert et qu'on ne ramasse pas la terre, on pose directement
+    // Si on ne ramasse pas la terre et qu'il n'y a qu'un seul groupe (ou que l'équipe a déjà ouvert), on pose directement
     const monEq = etatGlobal.equipes[etatGlobal.monEquipe];
-    if (monEq && monEq.aOuvert && !terreSelectionnee) {
-        socket.emit('demandeDescendreCombinaison', grouped.map(g => ({ cartesId: g.cartesId })));
+    if (!terreSelectionnee && (grouped.length === 1 || (monEq && monEq.aOuvert))) {
+        envoyerActionDeJeu('demandeDescendreCombinaison', grouped.map(g => ({ cartesId: g.cartesId })));
         cartesSelectionnees.clear();
         groupesVerrouillesLocaux = [];
         sons.jouer('succes');
@@ -681,13 +694,10 @@ document.getElementById('btn-valider-pose').addEventListener('click', () => {
     
     // Si le joueur n'a pas encore joué (ni pioché ni ramassé), c'est qu'il tente une ouverture sur la terre
     if (!etatGlobal.aJoueCeTour && etatGlobal.carteDessusDefausse) {
-        socket.emit('demandeRamasserTerre', dataToSend);
+        envoyerActionDeJeu('demandeRamasserTerre', dataToSend);
     } else {
-        socket.emit('demandeDescendreCombinaison', dataToSend);
+        envoyerActionDeJeu('demandeDescendreCombinaison', dataToSend);
     }
-    
-    verrouAction = true;
-    setTimeout(() => verrouAction = false, 1000);
 });
 
 document.getElementById('btn-annuler-pose').addEventListener('click', () => {
@@ -727,9 +737,7 @@ const btnSet = document.getElementById('btn-settings'); if(btnSet) btnSet.addEve
 // Piocher en cliquant sur la pile
 document.getElementById('pioche').addEventListener('click', () => {
     if (verrouAction || !etatGlobal || etatGlobal.tourActuel !== monNumero) return;
-    verrouAction = true;
-    socket.emit('demandePiocher');
-    setTimeout(() => verrouAction = false, 1000);
+    envoyerActionDeJeu('demandePiocher');
 });
 
 // Ramasser terre en cliquant sur la terre
@@ -738,11 +746,9 @@ document.getElementById('terre').addEventListener('click', () => {
     
     // NEW LOGIC: Discard selected card if player has drawn (phase 2)
     if (etatGlobal.aJoueCeTour && cartesSelectionnees.size === 1) {
-        verrouAction = true;
         const cardId = Array.from(cartesSelectionnees)[0];
-        socket.emit('demandeJouerCarte', cardId);
+        envoyerActionDeJeu('demandeJouerCarte', cardId);
         cartesSelectionnees.clear();
-        setTimeout(() => verrouAction = false, 1000);
         return;
     }
     
@@ -760,6 +766,22 @@ document.getElementById('terre').addEventListener('click', () => {
         terreEl.style.boxShadow = '0 0 10px 4px var(--green)';
         terreEl.style.transform = 'translateY(-10px)';
         sons.jouer('select');
+        
+        // AUTO-SUGGESTION : Sélectionner automatiquement les cartes naturelles correspondantes
+        const topCard = etatGlobal.carteDessusDefausse;
+        if (topCard && topCard.valeur && topCard.valeur !== 'Joker' && topCard.valeur !== '2' && !topCard.est3Noir && topCard.valeur !== '3 Rouge') {
+            let matchCount = 0;
+            etatGlobal.maMain.forEach(c => {
+                if (c.valeur === topCard.valeur && !c.estJoker && c.valeur !== '2') {
+                    cartesSelectionnees.add(c.id);
+                    matchCount++;
+                }
+            });
+            if (matchCount > 0) {
+                // Update badges dynamically if needed
+                rendreMain(etatGlobal.maMain); // Re-render to show selection
+            }
+        }
     } else {
         terreEl.style.boxShadow = 'none';
         terreEl.style.transform = 'none';
@@ -829,18 +851,33 @@ function colorSelectedGroups() {
 }
 
 function highlightCompatibleMelds() {
-    document.querySelectorAll('.canasta').forEach(el => el.classList.remove('compatible'));
+    document.querySelectorAll('.canasta').forEach(el => {
+        el.classList.remove('compatible');
+        el.style.opacity = '1';
+        el.style.boxShadow = '';
+    });
     const ghost = document.querySelector('#melds-equipe .meld-ghost');
-    if (ghost) ghost.classList.remove('compatible');
+    if (ghost) {
+        ghost.classList.remove('compatible');
+        ghost.style.opacity = '1';
+    }
 
     if (cartesSelectionnees.size > 0 && typeof evaluerSelection === 'function') {
         const evaluation = evaluerSelection();
+        // Griser toutes les piles par défaut
+        document.querySelectorAll('.canasta').forEach(el => el.style.opacity = '0.5');
+        
         if (evaluation.valide) {
             if (evaluation.type === 'ajout' && evaluation.cleUnique) {
                 const targetMeld = document.querySelector(`#melds-equipe .canasta[data-cle="${evaluation.cleUnique}"]`);
-                if (targetMeld) targetMeld.classList.add('compatible');
+                if (targetMeld) {
+                    targetMeld.classList.add('compatible');
+                    targetMeld.style.opacity = '1';
+                    targetMeld.style.boxShadow = '0 0 12px 4px var(--green)';
+                }
             } else if (evaluation.type === 'nouveau' && ghost) {
                 ghost.classList.add('compatible');
+                document.querySelectorAll('.canasta').forEach(el => el.style.opacity = '1'); // Si nouveau, on ne grise pas forcément
             }
         }
     }
@@ -906,13 +943,25 @@ function mettreAJourBoutons() {
         if (btnPoser) {
             btnPoser.style.display = 'flex';
             if (estMonTour && isSelectionValid) {
+                let pts = 0;
+                cartesSelectionnees.forEach(id => {
+                    const c = etatGlobal.maMain.find(carte => carte.id === id);
+                    if (c) pts += c.points;
+                });
+                btnPoser.innerHTML = `POSER <span style="font-size:10px;">(+${pts} pts)</span>`;
                 btnPoser.disabled = false;
                 btnPoser.style.transform = 'scale(1.1)';
                 btnPoser.style.opacity = '1';
+                btnPoser.style.boxShadow = '0 0 10px 2px var(--green)';
             } else {
+                btnPoser.textContent = 'POSER';
                 btnPoser.disabled = true;
                 btnPoser.style.transform = 'scale(1)';
                 btnPoser.style.opacity = '0.5';
+                btnPoser.style.boxShadow = 'none';
+                if (cartesSelectionnees.size > 0 && estMonTour) {
+                    btnPoser.style.boxShadow = '0 0 10px 2px var(--red)';
+                }
             }
         }
         const btnLock = document.getElementById('btn-lock');
@@ -1265,10 +1314,18 @@ function rendreMelds(equipeData, conteneurId) {
             const estMonTour = etatGlobal && etatGlobal.tourActuel === monNumero;
             const isMonEquipe = conteneurId === 'melds-equipe';
             if (estMonTour && isMonEquipe && cartesSelectionnees.size > 0) {
-                socket.emit('demandeDescendreCombinaison', [{
+                const idsValides = Array.from(cartesSelectionnees).filter(id => {
+                    const c = etatGlobal.maMain.find(carte => carte.id === id);
+                    return c && (c.valeur === combi.valeur || c.valeur === 'Joker' || c.valeur === '2');
+                });
+                if (idsValides.length !== cartesSelectionnees.size) {
+                    toast("Une carte sélectionnée ne correspond pas à ce groupe.", "error");
+                    return; // on n'envoie rien, pas de round-trip inutile vers le serveur
+                }
+                envoyerActionDeJeu('demandeDescendreCombinaison', [{
                     valeur: combi.valeur,
                     cleUnique: val,
-                    cartesId: Array.from(cartesSelectionnees)
+                    cartesId: idsValides
                 }]);
                 cartesSelectionnees.clear();
                 sons.jouer('succes');

@@ -1044,13 +1044,14 @@ io.on('connection', (socket) => {
     });
 
     // Game Events
-    socket.on('demandeJouerCarte', (carteId) => {
+    socket.on('demandeJouerCarte', (carteId, callback) => {
         const salon = getSalonPourSocket(socket.id);
         if (!salon || !salon.partie) return;
         let numeroJoueur = salon.joueurs[socket.id];
         if (!numeroJoueur) return;
 
         let resultat = salon.partie.actionJeter(numeroJoueur, carteId);
+        if (typeof callback === 'function') callback(resultat);
         
         if (resultat.ok) {
             diffuserAnimation(salon, 'animationJeter', numeroJoueur);
@@ -1090,13 +1091,14 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('demandePiocher', () => {
+    socket.on('demandePiocher', (callback) => {
         const salon = getSalonPourSocket(socket.id);
         if (!salon || !salon.partie) return;
         let numeroJoueur = salon.joueurs[socket.id];
         if (!numeroJoueur) return;
 
         let resultat = salon.partie.actionPiocher(numeroJoueur);
+        if (typeof callback === 'function') callback(resultat);
 
         if (resultat.ok) {
             if (resultat.piocheEpuisee) {
@@ -1117,13 +1119,14 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('demandeRamasserTerre', (groupesOuverture) => {
+    socket.on('demandeRamasserTerre', (groupesOuverture, callback) => {
         const salon = getSalonPourSocket(socket.id);
         if (!salon || !salon.partie) return;
         let numeroJoueur = salon.joueurs[socket.id];
         if (!numeroJoueur) return;
 
         let resultat = salon.partie.actionRamasserTerre(numeroJoueur, groupesOuverture);
+        if (typeof callback === 'function') callback(resultat);
 
         if (resultat.ok) {
             diffuserAlerte(salon, `Le Joueur ${numeroJoueur} a ramassé la terre (+1 carte piochée) !`);
@@ -1133,13 +1136,14 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('demandeDescendreCombinaison', (groupesProposees) => {
+    socket.on('demandeDescendreCombinaison', (groupesProposees, callback) => {
         const salon = getSalonPourSocket(socket.id);
         if (!salon || !salon.partie) return;
         let numeroJoueur = salon.joueurs[socket.id];
         if (!numeroJoueur) return;
 
         let resultat = salon.partie.actionDescendreCombinaisons(numeroJoueur, groupesProposees);
+        if (typeof callback === 'function') callback(resultat);
         if (resultat.ok) {
             diffuserAnimation(salon, 'animationDescendre', numeroJoueur);
             socket.emit('alerteJeu', "Combinaisons validées !");
