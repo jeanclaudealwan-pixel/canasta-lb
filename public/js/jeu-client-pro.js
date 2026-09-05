@@ -554,8 +554,8 @@ function evaluerSelection() {
     }
     
     if (valeurCible && combiTrouvee) {
-        if (combiTrouvee.estCanasta && cartesSelectionnees.size >= 3) {
-            return { valide: true, type: 'nouveau' };
+        if (cartesSelectionnees.size >= 3) {
+            return { valide: true, type: 'ajout_ou_nouveau', valeur: valeurCible, cleUnique: cleTrouvee };
         }
         return { valide: true, type: 'ajout', valeur: valeurCible, cleUnique: cleTrouvee };
     }
@@ -640,7 +640,21 @@ document.getElementById('btn-poser').addEventListener('click', () => {
     
     // Si on ne ramasse pas la terre et qu'il n'y a qu'un seul groupe (ou que l'équipe a déjà ouvert), on pose directement
     const monEq = etatGlobal.equipes[etatGlobal.monEquipe];
-    if (!terreSelectionnee && (grouped.length === 1 || (monEq && monEq.aOuvert))) {
+    
+    // Prévention des faux départs : si l'équipe n'a pas ouvert, on vérifie que le groupe unique atteint le seuil
+    let meetThreshold = true;
+    if (monEq && !monEq.aOuvert) {
+        let points = 0;
+        grouped.forEach(g => {
+            g.cartesId.forEach(id => {
+                const c = etatGlobal.maMain.find(carte => carte.id === id);
+                if (c) points += c.points;
+            });
+        });
+        if (points < monEq.seuilOuverture) meetThreshold = false;
+    }
+
+    if (!terreSelectionnee && (monEq && monEq.aOuvert || (grouped.length === 1 && meetThreshold))) {
         envoyerActionDeJeu('demandeDescendreCombinaison', grouped.map(g => ({ cartesId: g.cartesId })));
         cartesSelectionnees.clear();
         groupesVerrouillesLocaux = [];
@@ -875,16 +889,24 @@ function highlightCompatibleMelds() {
         document.querySelectorAll('.canasta').forEach(el => el.style.opacity = '0.5');
         
         if (evaluation.valide) {
-            if (evaluation.type === 'ajout' && evaluation.cleUnique) {
-                const targetMeld = document.querySelector(`#melds-equipe .canasta[data-cle="${evaluation.cleUnique}"]`);
-                if (targetMeld) {
-                    targetMeld.classList.add('compatible');
-                    targetMeld.style.opacity = '1';
-                    targetMeld.style.boxShadow = '0 0 12px 4px var(--green)';
+            if (evaluation.type === 'ajout' || evaluation.type === 'ajout_ou_nouveau') {
+                if (evaluation.cleUnique) {
+                    const targetMeld = document.querySelector(`#melds-equipe .canasta[data-cle="${evaluation.cleUnique}"]`);
+                    if (targetMeld) {
+                        targetMeld.classList.add('compatible');
+                        targetMeld.style.opacity = '1';
+                        targetMeld.style.boxShadow = '0 0 12px 4px var(--green)';
+                    }
                 }
-            } else if (evaluation.type === 'nouveau' && ghost) {
-                ghost.classList.add('compatible');
-                document.querySelectorAll('.canasta').forEach(el => el.style.opacity = '1'); // Si nouveau, on ne grise pas forcément
+            }
+            if (evaluation.type === 'nouveau' || evaluation.type === 'ajout_ou_nouveau') {
+                if (ghost) {
+                    ghost.classList.add('compatible');
+                    ghost.style.opacity = '1';
+                }
+                if (evaluation.type === 'nouveau') {
+                    document.querySelectorAll('.canasta').forEach(el => el.style.opacity = '1'); // Si nouveau pur, on ne grise pas forcément
+                }
             }
         }
     }
@@ -951,10 +973,18 @@ function mettreAJourBoutons() {
             btnPoser.style.display = 'flex';
             if (estMonTour && isSelectionValid) {
                 let pts = 0;
-                cartesSelectionnees.forEach(id => {
+                const tousLesIds = Array.from(cartesSelectionnees);
+                groupesVerrouillesLocaux.forEach(arr => tousLesIds.push(...arr));
+                
+                tousLesIds.forEach(id => {
                     const c = etatGlobal.maMain.find(carte => carte.id === id);
                     if (c) pts += c.points;
                 });
+                
+                if (terreSelectionnee && etatGlobal.carteDessusDefausse) {
+                    pts += etatGlobal.carteDessusDefausse.points;
+                }
+                
                 btnPoser.innerHTML = `POSER <span style="font-size:10px;">(+${pts} pts)</span>`;
                 btnPoser.disabled = false;
                 btnPoser.style.transform = 'scale(1.1)';
