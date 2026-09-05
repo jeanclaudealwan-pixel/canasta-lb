@@ -969,7 +969,7 @@ function mettreAJourBoutons() {
             isSelectionValid = evaluerSelection().valide;
         }
 
-        if (cartesSelectionnees.size === 1 && estMonTour && etatGlobal.aJoueCeTour) {
+        if (cartesSelectionnees.size === 1 && estMonTour && etatGlobal.aJoueCeTour && groupesVerrouillesLocaux.length === 0) {
             if (btnJeter) btnJeter.style.display = 'flex';
         } else {
             if (btnJeter) btnJeter.style.display = 'none';
