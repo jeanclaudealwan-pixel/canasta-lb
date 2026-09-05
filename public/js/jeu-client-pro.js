@@ -312,10 +312,17 @@ socket.on('recevoirEmoji', (data) => {
 function envoyerActionDeJeu(eventName, payload) {
     if (verrouAction) return;
     verrouAction = true;
-    socket.emit(eventName, payload, (resultat) => {
+    
+    const callback = (resultat) => {
         verrouAction = false;
         if (resultat && resultat.ok === false) toast(resultat.erreur, 'error');
-    });
+    };
+
+    if (payload === undefined) {
+        socket.emit(eventName, callback);
+    } else {
+        socket.emit(eventName, payload, callback);
+    }
 }
 
 // Force text onto buttons in case index.html is cached with old emojis
