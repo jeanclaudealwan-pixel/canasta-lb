@@ -313,9 +313,9 @@ function envoyerActionDeJeu(eventName, payload) {
     if (verrouAction) return;
     verrouAction = true;
     
-    const callback = (resultat) => {
+    const callback = () => {
         verrouAction = false;
-        if (resultat && resultat.ok === false) toast(resultat.erreur, 'error');
+        // Le toast et le nettoyage sont déjà gérés par 'alerteJeu' en cas d'erreur.
     };
 
     if (payload === undefined) {
