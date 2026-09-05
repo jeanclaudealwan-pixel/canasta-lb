@@ -15,7 +15,8 @@ class GestionnaireSons {
             'select': [800, 0.05, 'sine'],
             'erreur': [150, 0.3, 'sawtooth'],
             'succes': [600, 0.2, 'sine'],
-            'victoire': [440, 0.5, 'square']
+            'victoire': [440, 0.5, 'square'],
+            'canasta': [523, 0.4, 'sine']
         };
         this.frequences = frequences;
 
@@ -48,6 +49,10 @@ class GestionnaireSons {
         if (nom === 'victoire') {
             osc.frequency.exponentialRampToValueAtTime(880, this.ctx.currentTime + 0.3);
             osc.frequency.exponentialRampToValueAtTime(1100, this.ctx.currentTime + 0.5);
+        } else if (nom === 'canasta') {
+            osc.frequency.setValueAtTime(523, this.ctx.currentTime);
+            osc.frequency.setValueAtTime(784, this.ctx.currentTime + 0.12);
+            osc.frequency.setValueAtTime(1046, this.ctx.currentTime + 0.24);
         } else if (nom === 'succes') {
             osc.frequency.setValueAtTime(600, this.ctx.currentTime);
             osc.frequency.setValueAtTime(800, this.ctx.currentTime + 0.1);
@@ -75,6 +80,8 @@ window.socket = socket;
 let ecranActuel = 'lobby'; // lobby | salon | jeu
 let monNumero = 1; // 1, 2, 3 ou 4
 let estSpectateur = false;
+let verrouAction = false;
+let canastasConnues = new Set();
 let cartesRecemmentPiochees = new Set();
 let cartesSelectionnees = new Set();
 let terreSelectionnee = false;
@@ -86,7 +93,6 @@ let localHandOrder = []; // Stores card IDs in user-sorted order
 // Mécanique de double tap
 let dernierTap = {};
 const DOUBLE_TAP_MS = 300;
-let verrouAction = false;
 
 // =============================================================================
 // UTILITAIRES UI
@@ -1347,6 +1353,18 @@ function rendreMelds(equipeData, conteneurId) {
         }
         canastaDiv.appendChild(tag);
         
+        const idUniqueCanasta = conteneurId + '-' + val;
+        if (combi.estCanasta && !canastasConnues.has(idUniqueCanasta)) {
+            canastasConnues.add(idUniqueCanasta);
+            canastaDiv.style.position = 'relative';
+            const burst = document.createElement('div');
+            burst.className = 'canasta-burst';
+            burst.textContent = '🎉 CANASTA';
+            canastaDiv.appendChild(burst);
+            sons.jouer('canasta');
+            setTimeout(() => burst.remove(), 1200);
+        }
+        
         canastaDiv.addEventListener('click', () => {
             const estMonTour = etatGlobal && etatGlobal.tourActuel === monNumero;
             const isMonEquipe = conteneurId === 'melds-equipe';
@@ -1632,6 +1650,34 @@ function rendreDefausse(carteDessus, taille) {
 // =============================================================================
 // BOUCLE PRINCIPALE SOCKET.IO
 // =============================================================================
+socket.on('lancerDistribution', () => {
+    canastasConnues.clear();
+    const zones = ['conteneur-main', 'adv-gauche', 'adv-haut', 'adv-droite'];
+    const pioche = document.getElementById('pioche');
+    
+    // Cacher la vraie main le temps du show (elle arrivera via miseAJourEtat juste après)
+    const mainEl = document.getElementById('conteneur-main');
+    if (mainEl) mainEl.style.opacity = '0';
+    
+    const nbTours = 4; // effet stylisé, pas 1:1 avec les 11 cartes réelles
+    let compteur = 0;
+    const total = nbTours * zones.length;
+    
+    const intervalle = setInterval(() => {
+        if (compteur >= total) {
+            clearInterval(intervalle);
+            if (mainEl) mainEl.style.transition = 'opacity 0.4s ease';
+            if (mainEl) mainEl.style.opacity = '1';
+            return;
+        }
+        const idZone = zones[compteur % zones.length];
+        const dest = document.getElementById(idZone);
+        if (pioche && dest) animerCarte(pioche, dest, '');
+        if (compteur % 2 === 0) sons.jouer('piocher');
+        compteur++;
+    }, 90);
+});
+
 socket.on('miseAJourEtat', (etat) => {
     etatGlobal = etat;
     if (etat.enJeu && ecranActuel !== 'jeu') {
@@ -1697,21 +1743,21 @@ function afficherRecap(recap) {
         if (!d) continue;
         html += `<div style="flex:1; min-width:250px; background:rgba(0,0,0,0.2); padding:15px; border-radius:10px;">`;
         html += `<h3 style="color:${eq===etatGlobal.monEquipe?'#3498db':'#e74c3c'}; margin-top:0; text-align:center;">${eq===etatGlobal.monEquipe?'Notre Équipe':'Adversaires'}</h3>`;
-        html += `<div class="ligne-score"><span>3 Rouges :</span><span>${d.detail.troisRouges}</span></div>`;
+        html += `<div class="ligne-score reveal"><span>3 Rouges :</span><span>${d.detail.troisRouges}</span></div>`;
         let signPose = d.detail.pointsEnArriere ? '-' : '';
-        html += `<div class="ligne-score"><span>Posé :</span><span style="color:${d.detail.pointsEnArriere?'indianred':'inherit'}">${signPose}${d.detail.valeurCombinaisons}</span></div>`;
+        html += `<div class="ligne-score reveal"><span>Posé :</span><span style="color:${d.detail.pointsEnArriere?'indianred':'inherit'}">${signPose}${d.detail.valeurCombinaisons}</span></div>`;
         
         let pures = d.detail.canastas.filter(c=>c.pure).reduce((s,c)=>s+c.points,0);
         let impures = d.detail.canastas.filter(c=>!c.pure).reduce((s,c)=>s+c.points,0);
-        html += `<div class="ligne-score"><span>Canastas Pures :</span><span>${pures}</span></div>`;
-        html += `<div class="ligne-score"><span>Canastas Impures :</span><span>${impures}</span></div>`;
+        html += `<div class="ligne-score reveal"><span>Canastas Pures :</span><span>${pures}</span></div>`;
+        html += `<div class="ligne-score reveal"><span>Canastas Impures :</span><span>${impures}</span></div>`;
         
         if (d.detail.bonusSortie) {
-            html += `<div class="ligne-score" style="color:var(--gold)"><span>Sortie :</span><span>${d.detail.bonusSortie}</span></div>`;
+            html += `<div class="ligne-score reveal" style="color:var(--gold)"><span>Sortie :</span><span>${d.detail.bonusSortie}</span></div>`;
         }
-        html += `<div class="ligne-score" style="color:var(--red)"><span>Main restante :</span><span>-${d.detail.valeurMainRestante}</span></div>`;
-        html += `<div class="ligne-score" style="margin-top:10px;"><span>TOTAL MANCHE :</span><span>${d.pointsManche}</span></div>`;
-        html += `<div class="ligne-score" style="color:var(--gold); font-size:1.2em;"><span>SCORE GLOBAL :</span><span>${d.scoreTotal}</span></div>`;
+        html += `<div class="ligne-score reveal" style="color:var(--red)"><span>Main restante :</span><span>-${d.detail.valeurMainRestante}</span></div>`;
+        html += `<div class="ligne-score reveal" style="margin-top:10px;"><span>TOTAL MANCHE :</span><span>${d.pointsManche}</span></div>`;
+        html += `<div class="ligne-score reveal" style="color:var(--gold); font-size:1.2em;"><span>SCORE GLOBAL :</span><span>${d.scoreTotal}</span></div>`;
         html += `</div>`;
     }
     html += '</div>';
@@ -1736,6 +1782,28 @@ function afficherRecap(recap) {
     }
 
     document.getElementById('contenu-scores').innerHTML = html;
+    
+    document.querySelectorAll('#contenu-scores .ligne-score').forEach((el, i) => {
+        el.style.animationDelay = (i * 0.08) + 's';
+    });
+    
+    // Compteur animé pour chaque "SCORE GLOBAL"
+    document.querySelectorAll('#contenu-scores .ligne-score span:last-child').forEach(span => {
+        const parentDiv = span.closest('div');
+        if (!parentDiv || !parentDiv.textContent.includes('SCORE GLOBAL')) return;
+        const cible = parseInt(span.textContent);
+        if (isNaN(cible)) return;
+        
+        let depart = 0;
+        const duree = 700, t0 = performance.now();
+        function step(t) {
+            const p = Math.min((t - t0) / duree, 1);
+            span.textContent = Math.round(depart + (cible - depart) * p);
+            if (p < 1) requestAnimationFrame(step);
+            else { span.textContent = cible; sons.jouer('select'); }
+        }
+        requestAnimationFrame(step);
+    });
 }
 
 document.getElementById('btn-fermer-scores').addEventListener('click', () => {
@@ -1840,8 +1908,8 @@ socket.on('connect', () => {
     socket.emit('verifierReconnexion');
     
     const oldId = localStorage.getItem('canastaSessionId');
-    if (token) {
-        socket.emit('tentativeReconnexion', token);
+    if (oldId) {
+        socket.emit('tentativeReconnexion', oldId);
     }
     localStorage.setItem('canastaSessionId', socket.id);
     

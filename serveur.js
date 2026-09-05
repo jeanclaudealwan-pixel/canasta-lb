@@ -347,6 +347,13 @@ class BotJoueur {
 
 function verifierTourBot(salon, numTour) { if (salon.bots && salon.bots[numTour]) { salon.bots[numTour].jouerTour(); } }
 
+function diffuserDistribution(salon) {
+    if (!salon) return;
+    for (let sId in salon.joueurs) {
+        if (!sId.startsWith('bot-')) io.to(sId).emit('lancerDistribution');
+    }
+}
+
 function diffuserAlerte(salon, message) {
     for (let sId in salon.joueurs) {
         if (!sId.startsWith('bot-')) io.to(sId).emit('alerteJeu', message);
@@ -802,6 +809,7 @@ io.on('connection', (socket) => {
             salon.bots[num] = new BotJoueur(num, salon, io);
         }
         salon.partie.demarrerNouvellePartie();
+        diffuserDistribution(salon);
         
         // Rig the hand for Player 1: Give them 3 Kings so they can lock a group
         let mainJ1 = salon.partie.joueurs[1].main;
@@ -863,6 +871,7 @@ io.on('connection', (socket) => {
         }
 
         salon.partie.demarrerNouvellePartie();
+        diffuserDistribution(salon);
         
         socket.emit('lancementJeu', salon.id);
         socket.join(salon.id);
@@ -1025,6 +1034,7 @@ io.on('connection', (socket) => {
 
         diffuserAlerte(salon, "La table est complète ! Distribution des cartes...");
         salon.partie.demarrerNouvellePartie();
+        diffuserDistribution(salon);
         diffuserEtatGlobal(salon);
         diffuserChangementTour(salon, salon.partie.tourActuel);
         verifierTourBot(salon, salon.partie.tourActuel);
@@ -1038,6 +1048,7 @@ io.on('connection', (socket) => {
         if (!salon || salon.hote !== socket.id || !salon.partie || salon.partie.enJeu || salon.partie.partieTerminee) return;
         
         salon.partie.demarrerNouvelleManche(salon.partie.prochainPremierJoueur);
+        diffuserDistribution(salon);
         diffuserChangementTour(salon, salon.partie.tourActuel);
         verifierTourBot(salon, salon.partie.tourActuel);
         diffuserEtatGlobal(salon);
