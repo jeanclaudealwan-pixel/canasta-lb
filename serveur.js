@@ -2,6 +2,7 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
+const { spawn } = require('child_process');
 
 const { PartieCanasta, calculerSeuilOuverture } = require('./serveur-logique/jeu');
 const db = require('./serveur-logique/database'); 
@@ -1003,12 +1004,22 @@ io.on('connection', (socket) => {
         if (!salon || salon.hote !== socket.id || salon.enCours) return;
         
         if (salon.placesDisponibles.length > 0) {
-            let num = salon.placesDisponibles.shift();
-            let botId = `bot-${num}-${Date.now()}`;
-            salon.joueurs[botId] = num;
+            console.log(`Lancement de l'IA Python pour le salon ${salon.id}`);
+            const pythonProcess = spawn('python3', ['client_ia.py', salon.id], {
+                cwd: path.join(__dirname, 'ia')
+            });
             
-            envoyerMiseAJourSalon(salon);
-            io.emit('listeSalons', getListeSalonsData());
+            pythonProcess.stdout.on('data', (data) => {
+                console.log(`[IA ${salon.id} stdout]: ${data}`);
+            });
+            
+            pythonProcess.stderr.on('data', (data) => {
+                console.error(`[IA ${salon.id} stderr]: ${data}`);
+            });
+            
+            pythonProcess.on('close', (code) => {
+                console.log(`[IA ${salon.id}] processus arrete (code ${code})`);
+            });
         }
     });
 
