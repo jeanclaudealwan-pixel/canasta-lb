@@ -1310,10 +1310,12 @@ io.on('connection', (socket) => {
                 socket.emit('alerteJeu', 'Reconnexion réussie !');
                 envoyerMiseAJourSalon(salon);
             } else {
-                socket.emit('alerteJeu', 'Impossible de se reconnecter.');
+                // Silencieux : c'était juste une tentative de fond
+                // socket.emit('alerteJeu', 'Impossible de se reconnecter.');
             }
         } else {
-            socket.emit('alerteJeu', 'Impossible de se reconnecter.');
+            // Silencieux
+            // socket.emit('alerteJeu', 'Impossible de se reconnecter.');
         }
     });
 
