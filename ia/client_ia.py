@@ -268,8 +268,13 @@ def get_action_mask(etat):
         
         # SÉCURITÉ ANTI-FREEZE
         if not any(mask[2:17]):
+            a_des_normales = any(counts.get(v, 0) > 0 for v in VALEURS if v not in ['Joker', '2', '3 Noir', '3N'])
             for i, val in enumerate(VALEURS):
-                if counts[val] > 0: mask[2 + i] = True
+                if counts[val] > 0:
+                    if a_des_normales and val in ['Joker', '2', '3 Noir', '3N']:
+                        mask[2 + i] = False
+                    else:
+                        mask[2 + i] = True
         
         # COMPLÉTER (47-58)
         table = equipe_data.get('table', {})
