@@ -171,6 +171,11 @@ function rejoindreInterfaceSalon(donnees) {
 socket.on('miseAJourSalon', (donnees) => {
     if (ecranActuel === 'salon') {
         mettreAJourSieges(donnees.joueurs, donnees.hote);
+        const btnBot = document.getElementById('btn-ajouter-bot');
+        if (btnBot) {
+            btnBot.disabled = false;
+            btnBot.innerHTML = '+ Ajouter Bot';
+        }
     }
 });
 
@@ -221,7 +226,11 @@ function mettreAJourSieges(joueurs, hote) {
     document.getElementById('btn-ajouter-bot').style.display = estHote ? 'block' : 'none';
 }
 
-document.getElementById('btn-ajouter-bot').addEventListener('click', () => socket.emit('ajouterBot'));
+document.getElementById('btn-ajouter-bot').addEventListener('click', (e) => {
+    e.target.disabled = true;
+    e.target.innerHTML = '<span style="opacity:0.7">Connexion IA...</span>';
+    socket.emit('ajouterBot');
+});
 document.getElementById('btn-demarrer').addEventListener('click', () => socket.emit('demarrerPartie'));
 document.getElementById('btn-quitter-salon').addEventListener('click', () => {
     socket.emit('quitterSalon');

@@ -805,3 +805,5 @@ input, textarea, .chat-messages {
     opacity: 0;
     animation: ligneReveal 0.35s ease forwards;
 }
+
+.opponent-left .avatar-name, .opponent-right .avatar-name { max-width: 54px; }
