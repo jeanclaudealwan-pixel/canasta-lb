@@ -1854,10 +1854,15 @@ function afficherVictoire(vainqueur, equipes) {
     // Update stats in localStorage
     if (!window.statsMisesAJour) {
         window.statsMisesAJour = true; // Prevent double trigger
-        let stats = JSON.parse(localStorage.getItem('canastaStats') || '{"jouees":0, "gagnees":0, "meilleurScore":0}');
-        stats.jouees++;
-        if (vainqueur === etatGlobal.monEquipe) stats.gagnees++;
-        if (equipes[etatGlobal.monEquipe].score > stats.meilleurScore) {
+        let stats = JSON.parse(localStorage.getItem('canastaStats') || '{"jouees":0, "gagnees":0, "meilleurScore":0, "xp":0}');
+        stats.jouees = (stats.jouees || 0) + 1;
+        if (vainqueur === etatGlobal.monEquipe) {
+            stats.gagnees = (stats.gagnees || 0) + 1;
+            stats.xp = (stats.xp || 0) + 150;
+        } else {
+            stats.xp = (stats.xp || 0) + 25;
+        }
+        if (equipes[etatGlobal.monEquipe].score > (stats.meilleurScore || 0)) {
             stats.meilleurScore = equipes[etatGlobal.monEquipe].score;
         }
         localStorage.setItem('canastaStats', JSON.stringify(stats));
