@@ -991,7 +991,10 @@ function mettreAJourBoutons() {
                     pts += etatGlobal.carteDessusDefausse.points;
                 }
                 
-                btnPoser.innerHTML = `POSER <span style="font-size:10px;">(+${pts} pts)</span>`;
+                btnPoser.innerHTML = `
+                    <span style="font-weight:800;">POSER</span>
+                    <span style="font-size:9px; font-weight:900; background:rgba(0,0,0,0.3); color:#fff; padding:1px 6px; border-radius:8px; margin-left:2px;">+${pts}</span>
+                `;
                 btnPoser.disabled = false;
                 btnPoser.style.transform = 'scale(1.1)';
                 btnPoser.style.opacity = '1';
@@ -1488,8 +1491,8 @@ function rendreAdversaires(etat) {
             <span class="card-count">${nbCartes}</span>
           </div>
           <div class="avatar-name" style="display:flex; align-items:center; gap:4px; justify-content:center;">
-            <span style="width:8px; height:8px; border-radius:50%; background-color:${couleurJoueur}; display:inline-block; border:1px solid rgba(0,0,0,0.5);"></span>
-            ${name}
+            <span style="width:8px; height:8px; border-radius:50%; background-color:${couleurJoueur}; display:inline-block; border:1px solid rgba(0,0,0,0.5); flex-shrink:0;"></span>
+            <span style="min-width:0; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${name}</span>
           </div>
         `;
     }
