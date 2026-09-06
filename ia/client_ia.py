@@ -110,15 +110,29 @@ def get_action_mask(etat):
     # 1. Calcul des cartes Safe (3 jeux = 12 cartes de chaque)
     cartes_safe = set()
     compte_visible = {val: 0 for val in VALEURS}
-    for c in main: compte_visible[c.get('valeur', '')] += 1
+    
+    # Importer normaliser_valeur si pas déjà fait ou utiliser une conversion locale
+    def norm_val(c):
+        v = c.get('valeur')
+        if v == '3 Rouge': return '3R'
+        if v == '3 Noir': return '3N'
+        return v
+        
+    for c in main:
+        v = norm_val(c)
+        if v in compte_visible:
+            compte_visible[v] += 1
+            
     for eq in equipes.values():
         for meld in eq.get('table', {}).values():
             for c in meld.get('cartes', []):
                 if not c.get('estJoker', False) and c.get('valeur') != '2':
-                    compte_visible[c.get('valeur', '')] += 1
+                    v = norm_val(c)
+                    if v in compte_visible:
+                        compte_visible[v] += 1
                     
     for val, compte in compte_visible.items():
-        if val not in ['Joker', '2', '3 Noir', '3 Rouge']:
+        if val not in ['Joker', '2', '3N', '3R']:
             # S'il y a 8 cartes visibles (donc 4 ou moins restantes dans la nature),
             # il est très rare que l'adversaire de droite en ait exactement 2 en main.
             if (12 - compte) <= 4:
