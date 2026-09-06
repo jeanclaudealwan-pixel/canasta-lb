@@ -103,32 +103,47 @@ def get_action_mask(etat):
     terre_gelee = etat.get('terreGelee', False)
     taille_defausse = etat.get('tailleDefausse', 0)
     
-    # 1. Calcul des cartes dangereuses
-    valeurs_dangereuses = set()
     joueur_suivant = (mon_numero % 4) + 1
     equipe_suivante = 1 if joueur_suivant in [1, 3] else 2
     equipes = etat.get('equipes', {})
-    table_suiv = equipes.get(str(equipe_suivante), {}).get('table', {})
     
-    for meld in table_suiv.values():
-        val_meld = meld.get('valeur')
-        nb_poses = sum(1 for c in meld.get('cartes', []) if c.get('posePar') == joueur_suivant)
-        if nb_poses < 2:
-            valeurs_dangereuses.add(val_meld)
+    # 1. Calcul des cartes Safe (3 jeux = 12 cartes de chaque)
+    cartes_safe = set()
+    compte_visible = {val: 0 for val in VALEURS}
+    for c in main: compte_visible[c.get('valeur', '')] += 1
+    for eq in equipes.values():
+        for meld in eq.get('table', {}).values():
+            for c in meld.get('cartes', []):
+                if not c.get('estJoker', False) and c.get('valeur') != '2':
+                    compte_visible[c.get('valeur', '')] += 1
+                    
+    for val, compte in compte_visible.items():
+        if val not in ['Joker', '2', '3 Noir', '3 Rouge']:
+            # S'il y a 8 cartes visibles (donc 4 ou moins restantes dans la nature),
+            # il est très rare que l'adversaire de droite en ait exactement 2 en main.
+            if (12 - compte) <= 4:
+                cartes_safe.add(val)
+                
+    # 2. Dernière carte jetée par le joueur suivant = Safe
+    dernieres_jetees = etat.get('dernieresCartesJetees', {})
+    if str(joueur_suivant) in dernieres_jetees:
+        cartes_safe.add(dernieres_jetees[str(joueur_suivant)])
+        
+    # 3. Ce que l'adversaire a déjà descendu = Safe
+    table_adv = equipes.get('1' if str(etat.get('monEquipe')) == '2' else '2', {}).get('table', {})
+    for val in table_adv.keys():
+        cartes_safe.add(val)
 
     if a_joue:
         # V3.7: Vérifier si l'équipe peut mathématiquement ouvrir
         peut_ouvrir = True
         if not a_ouvert:
-            # Calcul des points exacts que ce script enverra au serveur pour l'ouverture
+            seuil = etat.get('seuilOuverture', 120)
             pts_base = 0
-            for v in VALEURS:
-                if v not in ['Joker', '2', '3R', '3N'] and counts[v] >= 3:
-                    pts_base += counts[v] * POINTS_FACIAUX.get(v, 0)
-            
-            valeur_meilleur_wc = 0
-            if counts['Joker'] > 0: valeur_meilleur_wc = 50
-            elif counts['2'] > 0: valeur_meilleur_wc = 25
+            valeur_meilleur_wc = 50 if counts['Joker'] > 0 else (25 if counts['2'] > 0 else 0)
+            for val in VALEURS:
+                if val not in ['Joker', '2', '3R', '3N'] and counts[val] >= 3:
+                    pts_base += 3 * POINTS_FACIAUX.get(val, 0)
             
             max_pts_possible = pts_base
             for v in VALEURS:
@@ -140,21 +155,45 @@ def get_action_mask(etat):
             if max_pts_possible < seuil:
                 peut_ouvrir = False
             
+        # Priorité absolue pour la défausse
+        doit_jeter_3_noir = (counts.get('3 Noir') or counts.get('3N', 0)) > 0
+        
         for i, val in enumerate(VALEURS):
-            # ── JETER (2-16) ──
+            # É JETER (2-16) É
             if counts[val] > 0:
-                if val in ['Joker', '2']:
-                    # RÈGLE NINJA 1
+                if doit_jeter_3_noir:
+                    # RÈGLE : Si j'ai un 3 Noir, c'est la SEULE carte que j'ai le droit de jeter !
+                    mask[2 + i] = (val in ['3 Noir', '3N'])
+                elif val in ['Joker', '2']:
+                    # RÈGLE NINJA AVANCÉE : On ne gèle pas une petite terre (< 8 cartes) 
+                    # et on ne gâche jamais de joker sur une terre déjà gelée !
                     if len(main) == 1:
-                        mask[2 + i] = True
-                    elif taille_defausse >= 6 and not terre_gelee:
+                        # RÈGLE DU SACRIFICE : Si on est obligé de jeter un atout, on jette toujours le 2 avant le Joker
+                        if counts['2'] > 0 and val == 'Joker':
+                            mask[2 + i] = False # On interdit le Joker s'il nous reste un 2
+                        else:
+                            mask[2 + i] = True
+                    elif terre_gelee:
+                        mask[2 + i] = False
+                    elif taille_defausse < 8:
+                        mask[2 + i] = False
+                    else:
+                        # Grosse terre : on peut geler. Mais on privilégie le 2 au Joker !
+                        if counts['2'] > 0 and val == 'Joker':
+                            mask[2 + i] = False
+                        else:
+                            mask[2 + i] = True
+                else:
+                    # Cartes normales
+                    if val in cartes_safe or len(main) == 1:
                         mask[2 + i] = True
                     else:
-                        mask[2 + i] = False
-                elif val in valeurs_dangereuses and not terre_gelee and len(main) > 1:
-                    mask[2 + i] = False
-                else:
-                    mask[2 + i] = True
+                        # Si ce n'est pas une carte safe, elle est risquée.
+                        # Si la terre est petite, on l'autorise (sacrifice). Sinon on l'interdit.
+                        if taille_defausse < 8:
+                            mask[2 + i] = True
+                        else:
+                            mask[2 + i] = False
             
             # ── DESCENDRE PUR (17-31) ──
             if val not in ['Joker', '2', '3R', '3N'] and counts[val] >= 3:
