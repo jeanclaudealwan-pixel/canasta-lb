@@ -26,7 +26,7 @@ NB_ACTIONS = 59
 
 # Connexion au serveur
 sio = socketio.Client()
-serveur_url = 'http://141.144.233.104'
+serveur_url = 'http://localhost:3000'
 
 print('Chargement du modèle d\'IA V3 (bot_canasta_v3.zip)...')
 try:
