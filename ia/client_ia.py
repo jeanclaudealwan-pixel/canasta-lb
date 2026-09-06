@@ -71,7 +71,7 @@ def get_action_mask(etat):
     mon_equipe_id = str(etat.get('monEquipe', 1))
     equipe_data = etat.get('equipes', {}).get(mon_equipe_id, {})
     a_ouvert = equipe_data.get('aOuvert', False)
-    seuil = equipe_data.get('seuilOuverture', 60)
+
 
     if not a_joue:
         # PIOCHER — toujours autorisé
@@ -152,7 +152,7 @@ def get_action_mask(etat):
         # V3.7: Vérifier si l'équipe peut mathématiquement ouvrir
         peut_ouvrir = True
         if not a_ouvert:
-            seuil = etat.get('seuilOuverture', 120)
+            seuil = equipe_data.get('seuilOuverture', 120)
             pts_base = 0
             valeur_meilleur_wc = 50 if counts['Joker'] > 0 else (25 if counts['2'] > 0 else 0)
             for val in VALEURS:
@@ -319,7 +319,9 @@ def jouer_coup():
         elif 32 <= action <= 46:
             valeur_cible = VALEURS[action - 32]
             cartes_ids = [c['id'] for c in etat_actuel['maMain'] if normaliser_valeur(c) == valeur_cible]
-            dispo_wc = [c['id'] for c in etat_actuel['maMain'] if c.get('estJoker') or c.get('valeur') == '2']
+            _raw_wc = [c for c in etat_actuel['maMain'] if c.get('estJoker') or c.get('valeur') == '2']
+            _raw_wc.sort(key=lambda c: 0 if c.get('valeur') == '2' else 1)
+            dispo_wc = [c['id'] for c in _raw_wc]
             nb_wc = max(0, 3 - len(cartes_ids))
             if nb_wc == 0: nb_wc = 1
             wc_utilises = dispo_wc[:nb_wc]
