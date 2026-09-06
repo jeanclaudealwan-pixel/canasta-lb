@@ -65,6 +65,20 @@ def evaluer_danger_adversaire(etat, mon_equipe_id):
 
     return adv_peut_sortir and main_adv_min <= 4
 
+def une_equipe_a_canasta_rouge(etat):
+    """Vérifie si au moins une équipe (alliée ou adverse) possède une Canasta Pure (Rouge)."""
+    for eq in etat.get('equipes', {}).values():
+        for combo in eq.get('table', {}).values():
+            if combo.get('estCanasta'):
+                cartes = combo.get('cartes', [])
+                est_pure = all(
+                    (not c.get('estJoker', False)) and (combo.get('valeur') == '2' or str(c.get('valeur')) != '2')
+                    for c in cartes
+                )
+                if est_pure:
+                    return True
+    return False
+
 def get_action_mask(etat):
     mask = np.zeros(NB_ACTIONS, dtype=bool)
     if not etat: return mask
@@ -277,7 +291,10 @@ def jouer_coup():
         mon_equipe_id_check = str(etat_actuel.get('monEquipe', 1))
         a_ouvert_check = etat_actuel.get('equipes', {}).get(mon_equipe_id_check, {}).get('aOuvert', False)
         danger_imminent = evaluer_danger_adversaire(etat_actuel, mon_equipe_id_check)
-        if a_ouvert_check and danger_imminent:
+        anti_gourmandise = une_equipe_a_canasta_rouge(etat_actuel)
+        
+        if a_ouvert_check and (danger_imminent or anti_gourmandise):
+            # On force TOUT : 1. Compléter, 2. Nouvelles Pures, 3. Nouvelles Impures (avec jokers)
             poses_possibles = (
                 [i for i in range(47, 59) if mask[i]] or
                 [i for i in range(17, 32) if mask[i]] or
@@ -285,7 +302,7 @@ def jouer_coup():
             )
             if poses_possibles:
                 action = poses_possibles[0]
-                print(f"-> DANGER : l'adversaire peut sortir (canastas complètes, main courte), forçage d'une pose (Action {action})")
+                print(f"-> VIDAGE DE MAIN (Urgence ou Canasta Rouge) : forçage d'une pose (Action {action})")
             else:
                 action, _ = model.predict(obs, action_masks=mask, deterministic=True)
                 action = int(action)
