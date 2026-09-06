@@ -133,15 +133,8 @@ def get_action_mask(etat):
     cartes_safe = set()
     compte_visible = {val: 0 for val in VALEURS}
     
-    # Importer normaliser_valeur si pas déjà fait ou utiliser une conversion locale
-    def norm_val(c):
-        v = c.get('valeur')
-        if v == '3 Rouge': return '3R'
-        if v == '3 Noir': return '3N'
-        return v
-        
     for c in main:
-        v = norm_val(c)
+        v = normaliser_valeur(c)
         if v in compte_visible:
             compte_visible[v] += 1
             
@@ -149,7 +142,7 @@ def get_action_mask(etat):
         for meld in eq.get('table', {}).values():
             for c in meld.get('cartes', []):
                 if not c.get('estJoker', False) and c.get('valeur') != '2':
-                    v = norm_val(c)
+                    v = normaliser_valeur(c)
                     if v in compte_visible:
                         compte_visible[v] += 1
                     
@@ -281,8 +274,10 @@ def jouer_coup():
             print("Aucun masque valide !")
             return
 
-        danger_imminent = evaluer_danger_adversaire(etat_actuel, mon_equipe_id)
-        if a_ouvert and danger_imminent:
+        mon_equipe_id_check = str(etat_actuel.get('monEquipe', 1))
+        a_ouvert_check = etat_actuel.get('equipes', {}).get(mon_equipe_id_check, {}).get('aOuvert', False)
+        danger_imminent = evaluer_danger_adversaire(etat_actuel, mon_equipe_id_check)
+        if a_ouvert_check and danger_imminent:
             poses_possibles = (
                 [i for i in range(47, 59) if mask[i]] or
                 [i for i in range(17, 32) if mask[i]] or
