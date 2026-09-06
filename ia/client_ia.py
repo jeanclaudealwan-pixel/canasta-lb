@@ -309,23 +309,35 @@ def jouer_coup():
         danger_imminent = evaluer_danger_adversaire(etat_actuel, mon_equipe_id_check)
         autre_equipe_id_check = '1' if mon_equipe_id_check == '2' else '2'
         
-        # URGENCE MAXIMALE (Prop 2 & 3)
+        # URGENCE MAXIMALE & ALERTE ORANGE
         notre_equipe_a_rouge = equipe_a_canasta_pure(etat_actuel, mon_equipe_id_check)
         adv_a_rouge = equipe_a_canasta_pure(etat_actuel, autre_equipe_id_check)
         adv_a_noire = equipe_a_canasta_impure(etat_actuel, autre_equipe_id_check)
         
         urgence_maximale = notre_equipe_a_rouge and (adv_a_rouge or adv_a_noire)
+        alerte_orange = adv_a_rouge and not urgence_maximale
         
-        if a_ouvert_check and (danger_imminent or urgence_maximale):
-            # On force TOUT : 1. Compléter, 2. Nouvelles Pures, 3. Nouvelles Impures (avec jokers)
-            poses_possibles = (
-                [i for i in range(47, 59) if mask[i]] or
-                [i for i in range(17, 32) if mask[i]] or
-                [i for i in range(32, 47) if mask[i]]
-            )
+        if a_ouvert_check and (danger_imminent or urgence_maximale or alerte_orange):
+            poses_possibles = []
+            
+            if danger_imminent or urgence_maximale:
+                # ALERTE ROUGE : On vide TOUT (Pures ET Impures pour sacrifier les atouts)
+                poses_possibles = (
+                    [i for i in range(47, 59) if mask[i]] or
+                    [i for i in range(17, 32) if mask[i]] or
+                    [i for i in range(32, 47) if mask[i]]
+                )
+                motif = "DANGER IMMINENT" if danger_imminent else "URGENCE MAXIMALE (Sacrifice Atouts)"
+            else:
+                # ALERTE ORANGE : On vide uniquement les PURES, on garde les atouts !
+                poses_possibles = (
+                    [i for i in range(47, 59) if mask[i]] or
+                    [i for i in range(17, 32) if mask[i]]
+                )
+                motif = "ALERTE ORANGE (Vidage cartes pures)"
+                
             if poses_possibles:
                 action = poses_possibles[0]
-                motif = "DANGER IMMINENT" if danger_imminent else "URGENCE MAXIMALE (Rush Canasta Noire)"
                 print(f"-> {motif} : forçage d'une pose (Action {action})")
             else:
                 action, _ = model.predict(obs, action_masks=mask, deterministic=True)
