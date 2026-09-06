@@ -43,6 +43,28 @@ en_attente_action = False
 # ═══════════════════════════════════════════════════════════════════════
 # MASQUE D'ACTIONS — Vérifie les vraies règles du jeu (V3 : avec seuil)
 # ═══════════════════════════════════════════════════════════════════════
+def evaluer_danger_adversaire(etat, mon_equipe_id):
+    autre_equipe_id = '1' if str(mon_equipe_id) == '2' else '2'
+    table_adv = etat.get('equipes', {}).get(autre_equipe_id, {}).get('table', {})
+
+    a_pure, a_impure = False, False
+    for combo in table_adv.values():
+        if combo.get('estCanasta'):
+            cartes = combo.get('cartes', [])
+            est_pure = all(
+                (not c.get('estJoker', False)) and (combo.get('valeur') == '2' or str(c.get('valeur')) != '2')
+                for c in cartes
+            )
+            if est_pure: a_pure = True
+            else: a_impure = True
+
+    adv_peut_sortir = a_pure and a_impure
+    numeros_adv = [n for n in [1,2,3,4] if (1 if n in [1,3] else 2) == int(autre_equipe_id)]
+    tailles_mains = etat.get('tailleMains', {})
+    main_adv_min = min((tailles_mains.get(str(n), 15) for n in numeros_adv), default=15)
+
+    return adv_peut_sortir and main_adv_min <= 4
+
 def get_action_mask(etat):
     mask = np.zeros(NB_ACTIONS, dtype=bool)
     if not etat: return mask
@@ -214,10 +236,12 @@ def get_action_mask(etat):
                 if a_ouvert or peut_ouvrir:
                     mask[17 + i] = True
                 
-            # ── DESCENDRE IMPUR (32-46) ──
-            if val not in ['Joker', '2', '3R', '3N'] and counts[val] >= 2 and wildcards >= 1:
+            # É DESCENDRE IMPUR (32-46) É
+            if val not in ['Joker', '2', '3N', '3R'] and counts[val] >= 2 and wildcards >= 1:
+                cartes_restantes_du_val = 12 - compte_visible.get(val, 0)
                 if a_ouvert or peut_ouvrir:
-                    mask[32 + i] = True
+                    # RÈGLE : Ne propose l'impur que si on ne peut raisonnablement plus avoir de pur
+                    mask[32 + i] = (cartes_restantes_du_val == 0)
         
         # SÉCURITÉ ANTI-FREEZE
         if not any(mask[2:17]):
@@ -257,9 +281,25 @@ def jouer_coup():
             print("Aucun masque valide !")
             return
 
-        action, _ = model.predict(obs, action_masks=mask, deterministic=True)
-        action = int(action)
-        print(f"-> Action ID : {action}")
+        danger_imminent = evaluer_danger_adversaire(etat_actuel, mon_equipe_id)
+        if a_ouvert and danger_imminent:
+            poses_possibles = (
+                [i for i in range(47, 59) if mask[i]] or
+                [i for i in range(17, 32) if mask[i]] or
+                [i for i in range(32, 47) if mask[i]]
+            )
+            if poses_possibles:
+                action = poses_possibles[0]
+                print(f"-> DANGER : l'adversaire peut sortir (canastas complètes, main courte), forçage d'une pose (Action {action})")
+            else:
+                action, _ = model.predict(obs, action_masks=mask, deterministic=True)
+                action = int(action)
+                print(f"-> Action ID : {action}")
+        else:
+            action, _ = model.predict(obs, action_masks=mask, deterministic=True)
+            action = int(action)
+            print(f"-> Action ID : {action}")
+            
         time.sleep(1.0)
         
         action_ok = False
