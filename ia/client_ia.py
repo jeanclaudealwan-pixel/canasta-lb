@@ -120,11 +120,25 @@ def get_action_mask(etat):
         # V3.7: Vérifier si l'équipe peut mathématiquement ouvrir
         peut_ouvrir = True
         if not a_ouvert:
-            # Calcul rapide (sans l'algo complexe de gym, on autorise l'action et le serveur bloquera 
-            # SI on n'a pas les points. Mais pour être propre, on devrait avoir le calculateur.
-            # Pour l'instant, vu que le serveur rejette, on laisse True, MAIS l'IA a été entraînée
-            # à ne pas essayer si elle ne peut pas. On garde simple pour le client.)
-            pass
+            # Calcul des points exacts que ce script enverra au serveur pour l'ouverture
+            pts_base = 0
+            for v in VALEURS:
+                if v not in ['Joker', '2', '3R', '3N'] and counts[v] >= 3:
+                    pts_base += counts[v] * POINTS_FACIAUX.get(v, 0)
+            
+            valeur_meilleur_wc = 0
+            if counts['Joker'] > 0: valeur_meilleur_wc = 50
+            elif counts['2'] > 0: valeur_meilleur_wc = 25
+            
+            max_pts_possible = pts_base
+            for v in VALEURS:
+                if v not in ['Joker', '2', '3R', '3N'] and counts[v] == 2 and wildcards >= 1:
+                    pts_impur = (2 * POINTS_FACIAUX.get(v, 0)) + valeur_meilleur_wc
+                    if pts_base + pts_impur > max_pts_possible:
+                        max_pts_possible = pts_base + pts_impur
+                        
+            if max_pts_possible < seuil:
+                peut_ouvrir = False
             
         for i, val in enumerate(VALEURS):
             # ── JETER (2-16) ──
@@ -144,11 +158,13 @@ def get_action_mask(etat):
             
             # ── DESCENDRE PUR (17-31) ──
             if val not in ['Joker', '2', '3R', '3N'] and counts[val] >= 3:
-                mask[17 + i] = True
+                if a_ouvert or peut_ouvrir:
+                    mask[17 + i] = True
                 
             # ── DESCENDRE IMPUR (32-46) ──
             if val not in ['Joker', '2', '3R', '3N'] and counts[val] >= 2 and wildcards >= 1:
-                mask[32 + i] = True
+                if a_ouvert or peut_ouvrir:
+                    mask[32 + i] = True
         
         # SÉCURITÉ ANTI-FREEZE
         if not any(mask[2:17]):
