@@ -65,18 +65,30 @@ def evaluer_danger_adversaire(etat, mon_equipe_id):
 
     return adv_peut_sortir and main_adv_min <= 4
 
-def une_equipe_a_canasta_rouge(etat):
-    """Vérifie si au moins une équipe (alliée ou adverse) possède une Canasta Pure (Rouge)."""
-    for eq in etat.get('equipes', {}).values():
-        for combo in eq.get('table', {}).values():
-            if combo.get('estCanasta'):
-                cartes = combo.get('cartes', [])
-                est_pure = all(
-                    (not c.get('estJoker', False)) and (combo.get('valeur') == '2' or str(c.get('valeur')) != '2')
-                    for c in cartes
-                )
-                if est_pure:
-                    return True
+def equipe_a_canasta_pure(etat, equipe_id):
+    """Vérifie si une équipe spécifique possède une Canasta Pure (Rouge)."""
+    table = etat.get('equipes', {}).get(str(equipe_id), {}).get('table', {})
+    for combo in table.values():
+        if combo.get('estCanasta'):
+            cartes = combo.get('cartes', [])
+            est_pure = all(
+                (not c.get('estJoker', False)) and (combo.get('valeur') == '2' or str(c.get('valeur')) != '2')
+                for c in cartes
+            )
+            if est_pure: return True
+    return False
+
+def equipe_a_canasta_impure(etat, equipe_id):
+    """Vérifie si une équipe spécifique possède une Canasta Impure (Noire)."""
+    table = etat.get('equipes', {}).get(str(equipe_id), {}).get('table', {})
+    for combo in table.values():
+        if combo.get('estCanasta'):
+            cartes = combo.get('cartes', [])
+            est_pure = all(
+                (not c.get('estJoker', False)) and (combo.get('valeur') == '2' or str(c.get('valeur')) != '2')
+                for c in cartes
+            )
+            if not est_pure: return True
     return False
 
 def get_action_mask(etat):
@@ -172,10 +184,18 @@ def get_action_mask(etat):
     if str(joueur_suivant) in dernieres_jetees:
         cartes_safe.add(dernieres_jetees[str(joueur_suivant)])
         
-    # 3. Ce que l'adversaire a déjà descendu = Safe
-    table_adv = equipes.get('1' if str(etat.get('monEquipe')) == '2' else '2', {}).get('table', {})
-    for val in table_adv.keys():
-        cartes_safe.add(val)
+    # 3. Ce que l'adversaire (le joueur suivant) a déjà descendu = Safe
+    equipe_suivant = '1' if str(etat.get('monEquipe')) == '2' else '2'
+    table_adv = equipes.get(equipe_suivant, {}).get('table', {})
+    for combo in table_adv.values():
+        val_combo = combo.get('valeur')
+        if val_combo:
+            cartes_safe.add(normaliser_valeur({'valeur': val_combo}))
+            
+    # Combien de cartes safe on a en main ?
+    main_vals = [normaliser_valeur(c) for c in main]
+    cartes_safe_en_main = [v for v in main_vals if v in cartes_safe]
+    a_des_cartes_safe = len(cartes_safe_en_main) > 0
 
     if a_joue:
         # V3.7: Vérifier si l'équipe peut mathématiquement ouvrir
@@ -208,24 +228,20 @@ def get_action_mask(etat):
                     # RÈGLE : Si j'ai un 3 Noir, c'est la SEULE carte que j'ai le droit de jeter !
                     mask[2 + i] = (val in ['3 Noir', '3N'])
                 elif val in ['Joker', '2']:
-                    # RÈGLE NINJA AVANCÉE : On ne gèle pas une petite terre (< 8 cartes) 
-                    # et on ne gâche jamais de joker sur une terre déjà gelée !
+                    # RÈGLES DE GEL STRICTES (Prop 1 & 4)
                     if len(main) == 1:
-                        # RÈGLE DU SACRIFICE : Si on est obligé de jeter un atout, on jette toujours le 2 avant le Joker
-                        if counts['2'] > 0 and val == 'Joker':
-                            mask[2 + i] = False # On interdit le Joker s'il nous reste un 2
-                        else:
-                            mask[2 + i] = True
+                        # RÈGLE DU SACRIFICE : Si on est obligé de jeter un atout en dernière carte
+                        mask[2 + i] = True if (counts['2'] == 0 or val == '2') else False
                     elif terre_gelee:
-                        mask[2 + i] = False
-                    elif taille_defausse < 8:
-                        mask[2 + i] = False
+                        mask[2 + i] = False # Interdit de geler une terre déjà gelée !
+                    elif taille_defausse < 12:
+                        mask[2 + i] = False # Terre trop petite, on attend 12 cartes
+                    elif a_des_cartes_safe:
+                        mask[2 + i] = False # On a des cartes Safe, on les jette AVANT de geler !
                     else:
-                        # Grosse terre : on peut geler. Mais on privilégie le 2 au Joker !
-                        if counts['2'] > 0 and val == 'Joker':
-                            mask[2 + i] = False
-                        else:
-                            mask[2 + i] = True
+                        # Terre >= 12, pas gelée, et AUCUNE carte safe : on peut geler.
+                        # Mais on privilégie toujours le 2 au Joker !
+                        mask[2 + i] = True if (counts['2'] == 0 or val == '2') else False
                 else:
                     # Cartes normales
                     if val in cartes_safe or len(main) == 1:
@@ -291,9 +307,16 @@ def jouer_coup():
         mon_equipe_id_check = str(etat_actuel.get('monEquipe', 1))
         a_ouvert_check = etat_actuel.get('equipes', {}).get(mon_equipe_id_check, {}).get('aOuvert', False)
         danger_imminent = evaluer_danger_adversaire(etat_actuel, mon_equipe_id_check)
-        anti_gourmandise = une_equipe_a_canasta_rouge(etat_actuel)
+        autre_equipe_id_check = '1' if mon_equipe_id_check == '2' else '2'
         
-        if a_ouvert_check and (danger_imminent or anti_gourmandise):
+        # URGENCE MAXIMALE (Prop 2 & 3)
+        notre_equipe_a_rouge = equipe_a_canasta_pure(etat_actuel, mon_equipe_id_check)
+        adv_a_rouge = equipe_a_canasta_pure(etat_actuel, autre_equipe_id_check)
+        adv_a_noire = equipe_a_canasta_impure(etat_actuel, autre_equipe_id_check)
+        
+        urgence_maximale = notre_equipe_a_rouge and (adv_a_rouge or adv_a_noire)
+        
+        if a_ouvert_check and (danger_imminent or urgence_maximale):
             # On force TOUT : 1. Compléter, 2. Nouvelles Pures, 3. Nouvelles Impures (avec jokers)
             poses_possibles = (
                 [i for i in range(47, 59) if mask[i]] or
@@ -302,7 +325,8 @@ def jouer_coup():
             )
             if poses_possibles:
                 action = poses_possibles[0]
-                print(f"-> VIDAGE DE MAIN (Urgence ou Canasta Rouge) : forçage d'une pose (Action {action})")
+                motif = "DANGER IMMINENT" if danger_imminent else "URGENCE MAXIMALE (Rush Canasta Noire)"
+                print(f"-> {motif} : forçage d'une pose (Action {action})")
             else:
                 action, _ = model.predict(obs, action_masks=mask, deterministic=True)
                 action = int(action)
