@@ -369,7 +369,8 @@ def jouer_coup():
         veut_sortir = (danger_imminent or urgence_maximale or notre_equipe_a_rouge)
         
         # DEMANDE D'AUTORISATION POUR SORTIR
-        if a_ouvert_check and veut_sortir and len(etat_actuel.get('maMain', [])) <= 6:
+        a_joue_check = etat_actuel.get('aJoueCeTour', False)
+        if a_joue_check and a_ouvert_check and veut_sortir and len(etat_actuel.get('maMain', [])) <= 6:
             etat_auto = getattr(sio, 'autorisation_sortie', None)
             if etat_auto is None:
                 print("\n-> [IA] Je m'apprête à vider ma main. Je demande l'autorisation de sortir à mon partenaire...")
@@ -527,9 +528,12 @@ def jouer_coup():
         if not action_ok:
             a_joue = etat_actuel.get('aJoueCeTour', False)
             if a_joue and etat_actuel.get('maMain'):
-                carte = etat_actuel['maMain'][0]
-                print(f"-> SECOURS : Jete {carte.get('valeur')} (ID: {carte['id']})")
-                sio.emit('demandeJouerCarte', carte['id'])
+                ma_main = etat_actuel['maMain']
+                # Chercher une carte normale à jeter en priorité
+                cartes_normales = [c for c in ma_main if c.get('valeur') not in ['Joker', '2', '3 Noir', '3N']]
+                carte_a_jeter = cartes_normales[0] if cartes_normales else ma_main[0]
+                print(f"-> SECOURS : Jete {carte_a_jeter.get('valeur')} (ID: {carte_a_jeter['id']})")
+                sio.emit('demandeJouerCarte', carte_a_jeter['id'])
             elif not a_joue:
                 print("-> SECOURS : Pioche")
                 sio.emit('demandePiocher')
@@ -615,8 +619,10 @@ def on_alerte_jeu(msg):
         else:
             ma_main = etat_actuel.get('maMain', [])
             if ma_main:
-                print(f"Secours: Jete {ma_main[0].get('valeur')} (ID: {ma_main[0]['id']})")
-                sio.emit('demandeJouerCarte', ma_main[0]['id'])
+                cartes_normales = [c for c in ma_main if c.get('valeur') not in ['Joker', '2', '3 Noir', '3N']]
+                carte_a_jeter = cartes_normales[0] if cartes_normales else ma_main[0]
+                print(f"Secours (Alerte): Jete {carte_a_jeter.get('valeur')} (ID: {carte_a_jeter['id']})")
+                sio.emit('demandeJouerCarte', carte_a_jeter['id'])
 
 @sio.on('questionSortie')
 def on_question_sortie(demandeur):
