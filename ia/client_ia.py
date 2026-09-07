@@ -292,6 +292,17 @@ def get_action_mask(etat):
                         else:
                             mask[2 + i] = False
             
+          # SÉCURITÉ ANTI-CRASH : S'il n'y a AUCUNE carte qu'on a le droit de jeter, on lève l'interdit !
+          # (Évite que le modèle crashe et déclenche le fallback aléatoire)
+          if not any(mask[2:17]):
+              for i, val in enumerate(VALEURS):
+                  if counts[val] > 0 and val not in ['3R', '3N']:
+                      if val in ['Joker', '2']:
+                          # On autorise les atouts, mais on privilégie le 2 au Joker
+                          mask[2 + i] = True if (counts['2'] == 0 or val == '2') else False
+                      else:
+                          mask[2 + i] = True
+
             # ── DESCENDRE PUR (17-31) ──
             if val not in ['Joker', '2', '3R', '3N'] and counts[val] >= 3:
                 if a_ouvert or peut_ouvrir:
