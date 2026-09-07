@@ -70,11 +70,12 @@ def equipe_a_canasta_pure(etat, equipe_id):
     table = etat.get('equipes', {}).get(str(equipe_id), {}).get('table', {})
     for combo in table.values():
         if combo.get('estCanasta'):
-            cartes = combo.get('cartes', [])
-            est_pure = all(
-                (not c.get('estJoker', False)) and (combo.get('valeur') == '2' or str(c.get('valeur')) != '2')
-                for c in cartes
-            )
+            est_pure = True
+            for c in combo.get('cartes', []):
+                val = str(c.get('valeur', ''))
+                if val == 'Joker' or (val == '2' and str(combo.get('valeur', '')) != '2'):
+                    est_pure = False
+                    break
             if est_pure: return True
     return False
 
@@ -83,12 +84,13 @@ def equipe_a_canasta_impure(etat, equipe_id):
     table = etat.get('equipes', {}).get(str(equipe_id), {}).get('table', {})
     for combo in table.values():
         if combo.get('estCanasta'):
-            cartes = combo.get('cartes', [])
-            est_pure = all(
-                (not c.get('estJoker', False)) and (combo.get('valeur') == '2' or str(c.get('valeur')) != '2')
-                for c in cartes
-            )
-            if not est_pure: return True
+            est_impure = False
+            for c in combo.get('cartes', []):
+                val = str(c.get('valeur', ''))
+                if val == 'Joker' or (val == '2' and str(combo.get('valeur', '')) != '2'):
+                    est_impure = True
+                    break
+            if est_impure: return True
     return False
 
 def get_action_mask(etat):
@@ -223,20 +225,35 @@ def get_action_mask(etat):
         peut_ouvrir = True
         if not a_ouvert:
             seuil = equipe_data.get('seuilOuverture', 120)
-            pts_base = 0
-            valeur_meilleur_wc = 50 if counts['Joker'] > 0 else (25 if counts['2'] > 0 else 0)
+            pts_total = 0
             for val in VALEURS:
                 if val not in ['Joker', '2', '3R', '3N'] and counts[val] >= 3:
-                    pts_base += 3 * POINTS_FACIAUX.get(val, 0)
+                    pts_total += 3 * POINTS_FACIAUX.get(val, 0)
             
-            max_pts_possible = pts_base
-            for v in VALEURS:
-                if v not in ['Joker', '2', '3R', '3N'] and counts[v] == 2 and wildcards >= 1:
-                    pts_impur = (2 * POINTS_FACIAUX.get(v, 0)) + valeur_meilleur_wc
-                    if pts_base + pts_impur > max_pts_possible:
-                        max_pts_possible = pts_base + pts_impur
-                        
-            if max_pts_possible < seuil:
+            taille_pioche = etat.get('taillePioche', 0)
+            autoriser_impurs = True
+            if seuil <= 90 and taille_pioche > 55:
+                autoriser_impurs = False
+                
+            if autoriser_impurs:
+                impurs_possibles = []
+                for v in VALEURS:
+                    if v not in ['Joker', '2', '3R', '3N'] and counts[v] == 2:
+                        impurs_possibles.append(v)
+                impurs_possibles.sort(key=lambda x: POINTS_FACIAUX.get(x, 0), reverse=True)
+                
+                nb_jokers = counts.get('Joker', 0)
+                nb_2 = counts.get('2', 0)
+                
+                for v in impurs_possibles:
+                    if nb_jokers > 0:
+                        pts_total += (2 * POINTS_FACIAUX.get(v, 0)) + 50
+                        nb_jokers -= 1
+                    elif nb_2 > 0:
+                        pts_total += (2 * POINTS_FACIAUX.get(v, 0)) + 25
+                        nb_2 -= 1
+                    
+            if pts_total < seuil:
                 peut_ouvrir = False
             
         # Priorité absolue pour la défausse
@@ -360,6 +377,7 @@ def jouer_coup():
         
         # URGENCE MAXIMALE & ALERTE ORANGE
         notre_equipe_a_rouge = equipe_a_canasta_pure(etat_actuel, mon_equipe_id_check)
+        notre_equipe_a_noire = equipe_a_canasta_impure(etat_actuel, mon_equipe_id_check)
         adv_a_rouge = equipe_a_canasta_pure(etat_actuel, autre_equipe_id_check)
         adv_a_noire = equipe_a_canasta_impure(etat_actuel, autre_equipe_id_check)
         
@@ -367,10 +385,11 @@ def jouer_coup():
         alerte_orange = adv_a_rouge and not urgence_maximale
         
         veut_sortir = (danger_imminent or urgence_maximale or notre_equipe_a_rouge)
+        peut_legalement_sortir = notre_equipe_a_rouge and notre_equipe_a_noire
         
         # DEMANDE D'AUTORISATION POUR SORTIR
         a_joue_check = etat_actuel.get('aJoueCeTour', False)
-        if a_joue_check and a_ouvert_check and veut_sortir and len(etat_actuel.get('maMain', [])) <= 6:
+        if a_joue_check and a_ouvert_check and veut_sortir and peut_legalement_sortir and len(etat_actuel.get('maMain', [])) <= 6:
             etat_auto = getattr(sio, 'autorisation_sortie', None)
             if etat_auto is None:
                 print("\n-> [IA] Je m'apprête à vider ma main. Je demande l'autorisation de sortir à mon partenaire...")
@@ -459,6 +478,10 @@ def jouer_coup():
                 a_ouvert = etat_actuel.get('equipes', {}).get(mon_equipe_id, {}).get('aOuvert', False)
                 if not a_ouvert:
                     used_ids = set(cartes_ids)
+                    # On calcule les points en ajoutant les groupes
+                    pts_ouverture = sum(POINTS_FACIAUX.get(normaliser_valeur(c), 0) for c in etat_actuel['maMain'] if c['id'] in used_ids)
+                    
+                    # 1. Ajouter tous les purs
                     for val2 in VALEURS:
                         if val2 == valeur_cible or val2 in ['Joker', '2', '3R', '3N']:
                             continue
@@ -467,6 +490,27 @@ def jouer_coup():
                         if len(other_ids) >= 3:
                             groupes.append({'cartesId': other_ids})
                             used_ids.update(other_ids)
+                            pts_ouverture += sum(POINTS_FACIAUX.get(normaliser_valeur(c), 0) for c in etat_actuel['maMain'] if c['id'] in other_ids)
+                            
+                    # 2. Ajouter les impurs possibles UNIQUEMENT si on n'a pas atteint le seuil
+                    seuil = etat_actuel.get('equipes', {}).get(mon_equipe_id, {}).get('seuilOuverture', 120)
+                    if pts_ouverture < seuil:
+                        _raw_wc_dispo = [c for c in etat_actuel['maMain'] if (c.get('estJoker') or c.get('valeur') == '2') and c['id'] not in used_ids]
+                        _raw_wc_dispo.sort(key=lambda c: 0 if c.get('valeur') == '2' else 1)
+                        dispo_wc = [c['id'] for c in _raw_wc_dispo]
+                        for val2 in VALEURS:
+                            if pts_ouverture >= seuil: break
+                            if val2 == valeur_cible or val2 in ['Joker', '2', '3R', '3N']:
+                                continue
+                            other_ids = [c['id'] for c in etat_actuel['maMain'] 
+                                         if normaliser_valeur(c) == val2 and c['id'] not in used_ids]
+                            if len(other_ids) == 2 and len(dispo_wc) >= 1:
+                                impure_ids = other_ids + [dispo_wc.pop(0)]
+                                groupes.append({'cartesId': impure_ids})
+                                used_ids.update(impure_ids)
+                                pts_ouverture += sum(POINTS_FACIAUX.get(normaliser_valeur(c), 0) for c in etat_actuel['maMain'] if c['id'] in impure_ids)
+                                
+                            
                     print(f"Action: OUVERTURE avec {len(groupes)} groupe(s) (déclenché par {valeur_cible})")
                 else:
                     print(f"Action: Pose {valeur_cible} pur ({len(cartes_ids)} cartes)")
@@ -494,6 +538,10 @@ def jouer_coup():
                 a_ouvert = etat_actuel.get('equipes', {}).get(mon_equipe_id, {}).get('aOuvert', False)
                 if not a_ouvert:
                     used_ids = set(cartes_ids)
+                    # On calcule les points en ajoutant les groupes
+                    pts_ouverture = sum(POINTS_FACIAUX.get(normaliser_valeur(c), 0) for c in etat_actuel['maMain'] if c['id'] in used_ids)
+                    
+                    # 1. Ajouter tous les purs
                     for val2 in VALEURS:
                         if val2 == valeur_cible or val2 in ['Joker', '2', '3R', '3N']:
                             continue
@@ -502,6 +550,27 @@ def jouer_coup():
                         if len(other_ids) >= 3:
                             groupes.append({'cartesId': other_ids})
                             used_ids.update(other_ids)
+                            pts_ouverture += sum(POINTS_FACIAUX.get(normaliser_valeur(c), 0) for c in etat_actuel['maMain'] if c['id'] in other_ids)
+                            
+                    # 2. Ajouter les impurs possibles UNIQUEMENT si on n'a pas atteint le seuil
+                    seuil = etat_actuel.get('equipes', {}).get(mon_equipe_id, {}).get('seuilOuverture', 120)
+                    if pts_ouverture < seuil:
+                        _raw_wc_dispo = [c for c in etat_actuel['maMain'] if (c.get('estJoker') or c.get('valeur') == '2') and c['id'] not in used_ids]
+                        _raw_wc_dispo.sort(key=lambda c: 0 if c.get('valeur') == '2' else 1)
+                        dispo_wc = [c['id'] for c in _raw_wc_dispo]
+                        for val2 in VALEURS:
+                            if pts_ouverture >= seuil: break
+                            if val2 == valeur_cible or val2 in ['Joker', '2', '3R', '3N']:
+                                continue
+                            other_ids = [c['id'] for c in etat_actuel['maMain'] 
+                                         if normaliser_valeur(c) == val2 and c['id'] not in used_ids]
+                            if len(other_ids) == 2 and len(dispo_wc) >= 1:
+                                impure_ids = other_ids + [dispo_wc.pop(0)]
+                                groupes.append({'cartesId': impure_ids})
+                                used_ids.update(impure_ids)
+                                pts_ouverture += sum(POINTS_FACIAUX.get(normaliser_valeur(c), 0) for c in etat_actuel['maMain'] if c['id'] in impure_ids)
+                                
+                            
                     print(f"Action: OUVERTURE IMPURE avec {len(groupes)} groupe(s) (déclenché par {valeur_cible})")
                 else:
                     print(f"Action: Pose {valeur_cible} impur ({len(cartes_ids)} cartes)")
