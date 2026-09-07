@@ -151,15 +151,38 @@ def get_action_mask(etat):
     terre_gelee = etat.get('terreGelee', False)
     taille_defausse = etat.get('tailleDefausse', 0)
     
+    # --- RÉVISION COMPLÈTE DE LA MÉMOIRE ET DES CARTES SAFE ---
+    global memoire_joueur_suivant, derniere_taille_defausse
+    
+    # 1. Mémoire d'éléphant (Joueur Suivant)
+    if 'memoire_joueur_suivant' not in globals():
+        memoire_joueur_suivant = set()
+        derniere_taille_defausse = 0
+
+    taille_defausse = etat.get('tailleDefausse', 0)
+    if taille_defausse < derniere_taille_defausse:
+        memoire_joueur_suivant.clear() # La terre a été ramassée, on efface la mémoire !
+    derniere_taille_defausse = taille_defausse
+    
     joueur_suivant = (mon_numero % 4) + 1
     equipe_suivante = 1 if joueur_suivant in [1, 3] else 2
     equipes = etat.get('equipes', {})
     
-    # 1. Calcul des cartes Safe (3 jeux = 12 cartes de chaque)
+    dernieres_jetees = etat.get('dernieresCartesJetees', {})
+    if str(joueur_suivant) in dernieres_jetees:
+        memoire_joueur_suivant.add(normaliser_valeur({'valeur': dernieres_jetees[str(joueur_suivant)]}))
+
+    # 2. Comptage Visible (Main + Tables + DÉFAUSSE)
     cartes_safe = set()
     compte_visible = {val: 0 for val in VALEURS}
     
     for c in main:
+        v = normaliser_valeur(c)
+        if v in compte_visible:
+            compte_visible[v] += 1
+            
+    # NOUVEAU : On compte toute la terre !
+    for c in etat.get('defausseVisible', []):
         v = normaliser_valeur(c)
         if v in compte_visible:
             compte_visible[v] += 1
@@ -174,16 +197,9 @@ def get_action_mask(etat):
                     
     for val, compte in compte_visible.items():
         if val not in ['Joker', '2', '3N', '3R']:
-            # S'il y a 8 cartes visibles (donc 4 ou moins restantes dans la nature),
-            # il est très rare que l'adversaire de droite en ait exactement 2 en main.
             if (12 - compte) <= 4:
                 cartes_safe.add(val)
                 
-    # 2. Dernière carte jetée par le joueur suivant = Safe
-    dernieres_jetees = etat.get('dernieresCartesJetees', {})
-    if str(joueur_suivant) in dernieres_jetees:
-        cartes_safe.add(dernieres_jetees[str(joueur_suivant)])
-        
     # 3. Ce que l'adversaire (le joueur suivant) a déjà descendu = Safe
     equipe_suivant = '1' if str(etat.get('monEquipe')) == '2' else '2'
     table_adv = equipes.get(equipe_suivant, {}).get('table', {})
@@ -191,6 +207,11 @@ def get_action_mask(etat):
         val_combo = combo.get('valeur')
         if val_combo:
             cartes_safe.add(normaliser_valeur({'valeur': val_combo}))
+            
+    # 4. Intégration de la Mémoire d'éléphant aux cartes Safe
+    for val in memoire_joueur_suivant:
+        if val not in ['Joker', '2', '3N', '3R']:
+            cartes_safe.add(val)
             
     # Combien de cartes safe on a en main ?
     main_vals = [normaliser_valeur(c) for c in main]
@@ -259,12 +280,30 @@ def get_action_mask(etat):
                 if a_ouvert or peut_ouvrir:
                     mask[17 + i] = True
                 
-            # É DESCENDRE IMPUR (32-46) É
+            # ── DESCENDRE IMPUR (32-46) ──
             if val not in ['Joker', '2', '3N', '3R'] and counts[val] >= 2 and wildcards >= 1:
-                cartes_restantes_du_val = 12 - compte_visible.get(val, 0)
                 if a_ouvert or peut_ouvrir:
-                    # RÈGLE : Ne propose l'impur que si on ne peut raisonnablement plus avoir de pur
-                    mask[32 + i] = (cartes_restantes_du_val == 0)
+                    cartes_deja_posees = 0
+                    for meld in equipe_data.get('table', {}).values():
+                        if meld.get('valeur') == val:
+                            cartes_deja_posees = sum(1 for c in meld.get('cartes', []) if not c.get('estJoker', False) and c.get('valeur') != '2')
+                    
+                    cartes_nous = counts[val] + cartes_deja_posees
+                    cartes_restantes = 12 - compte_visible.get(val, 0)
+                    
+                    # On a une chance très limitée de faire une pure s'il faut récupérer 100% des cartes restantes
+                    # (Ex: On a 4 cartes. Il en reste 3 dans la pioche. 4+3 = 7. C'est le max absolu, très dur à faire)
+                    chance_limitee = (cartes_nous + cartes_restantes <= 7)
+                    
+                    notre_equipe_a_rouge = False
+                    for meld in equipe_data.get('table', {}).values():
+                        if meld.get('estCanasta') and all(not c.get('estJoker', False) and str(c.get('valeur')) != '2' for c in meld.get('cartes', [])):
+                            notre_equipe_a_rouge = True
+
+                    if chance_limitee or notre_equipe_a_rouge:
+                        mask[32 + i] = True
+                    else:
+                        mask[32 + i] = False
         
         # SÉCURITÉ ANTI-FREEZE
         if not any(mask[2:17]):
@@ -290,6 +329,11 @@ def get_action_mask(etat):
                 else:
                     if counts.get(val_meld, 0) > 0:
                         mask[47 + i] = True
+                        
+    # --- RÈGLE DU REFUS DE SORTIE ---
+    # Si le partenaire a dit NON, l'IA est forcée de garder au moins 2 cartes (donc interdit de descendre)
+    if getattr(sio, 'autorisation_sortie', None) == False and len(main) <= 4:
+        mask[17:59] = False
                     
     return mask
 
@@ -319,22 +363,44 @@ def jouer_coup():
         adv_a_rouge = equipe_a_canasta_pure(etat_actuel, autre_equipe_id_check)
         adv_a_noire = equipe_a_canasta_impure(etat_actuel, autre_equipe_id_check)
         
-        urgence_maximale = notre_equipe_a_rouge and (adv_a_rouge or adv_a_noire)
+        urgence_maximale = adv_a_rouge and adv_a_noire
         alerte_orange = adv_a_rouge and not urgence_maximale
         
-        if a_ouvert_check and (danger_imminent or urgence_maximale or alerte_orange):
+        veut_sortir = (danger_imminent or urgence_maximale or notre_equipe_a_rouge)
+        
+        # DEMANDE D'AUTORISATION POUR SORTIR
+        if a_ouvert_check and veut_sortir and len(etat_actuel.get('maMain', [])) <= 6:
+            etat_auto = getattr(sio, 'autorisation_sortie', None)
+            if etat_auto is None:
+                print("\n-> [IA] Je m'apprête à vider ma main. Je demande l'autorisation de sortir à mon partenaire...")
+                sio.autorisation_sortie = 'en_attente'
+                sio.emit('demandeSortir')
+                return # On arrête de jouer et on attend la réponse
+            elif etat_auto == 'en_attente':
+                return # Toujours en attente, on ne fait rien
+        
+        if a_ouvert_check and (danger_imminent or urgence_maximale or alerte_orange or notre_equipe_a_rouge):
             poses_possibles = []
             
             if danger_imminent or urgence_maximale:
-                # ALERTE ROUGE : On vide TOUT (Pures ET Impures pour sacrifier les atouts)
+                # ALERTE ROUGE : L'adversaire a une Rouge ET une Noire. On vide TOUT en urgence absolue !
                 poses_possibles = (
                     [i for i in range(47, 59) if mask[i]] or
                     [i for i in range(17, 32) if mask[i]] or
                     [i for i in range(32, 47) if mask[i]]
                 )
-                motif = "DANGER IMMINENT" if danger_imminent else "URGENCE MAXIMALE (Sacrifice Atouts)"
-            else:
-                # ALERTE ORANGE : On vide uniquement les PURES, on garde les atouts !
+                motif = "DANGER IMMINENT" if danger_imminent else "URGENCE MAXIMALE (Adversaire prêt à fermer)"
+            elif notre_equipe_a_rouge:
+                # OFFENSIVE : Notre équipe a déjà la Rouge. L'objectif est de faire une Noire et sortir.
+                # On force toutes les poses possibles !
+                poses_possibles = (
+                    [i for i in range(47, 59) if mask[i]] or
+                    [i for i in range(17, 32) if mask[i]] or
+                    [i for i in range(32, 47) if mask[i]]
+                )
+                motif = "OFFENSIVE (On a la Rouge, on fonce vers la sortie)"
+            elif alerte_orange:
+                # ALERTE ORANGE : L'adversaire a une Rouge. On vide uniquement les PURES pour sauver des points, on garde les atouts.
                 poses_possibles = (
                     [i for i in range(47, 59) if mask[i]] or
                     [i for i in range(17, 32) if mask[i]]
@@ -530,6 +596,9 @@ def on_alerte_jeu(msg):
         "a ramassé la terre", "a pioché", "Distribution des cartes",
         "nouvelle manche", "Partie terminée", "a gagné", "Manche terminée"
     ]
+    if "Distribution des cartes" in msg or "nouvelle manche" in msg:
+        sio.autorisation_sortie = None
+
     if any(mot in msg for mot in mots_succes):
         return
 
@@ -548,11 +617,30 @@ def on_alerte_jeu(msg):
             if ma_main:
                 print(f"Secours: Jete {ma_main[0].get('valeur')} (ID: {ma_main[0]['id']})")
                 sio.emit('demandeJouerCarte', ma_main[0]['id'])
-        
+
+@sio.on('questionSortie')
+def on_question_sortie(demandeur):
+    print(f"\n-> [IA] Mon partenaire (Joueur {demandeur}) demande à sortir. J'accepte automatiquement !")
+    sio.emit('reponseSortie', {'accepte': True})
+
+@sio.on('resultatSortie')
+def on_resultat_sortie(data):
+    accepte = data.get('accepte', False) if isinstance(data, dict) else data
+    if accepte:
+        print("\n-> [IA] Mon partenaire a dit OUI ! Je lance l'offensive !")
+        sio.autorisation_sortie = True
+    else:
+        print("\n-> [IA] Mon partenaire a dit NON ! Je bloque mes descentes et je passe mon tour prudemment.")
+        sio.autorisation_sortie = False
+    
+    # On relance le coup avec la réponse
+    jouer_coup()
+
 @sio.on('disconnect')
 def disconnect():
     print('Déconnecté du serveur.')
 
 if __name__ == '__main__':
+    sio.autorisation_sortie = None
     sio.connect(serveur_url)
     sio.wait()
