@@ -493,14 +493,17 @@ def jouer_coup():
                 action = int(action)
                 print(f"-> Action ID : {action}")
         elif not a_ouvert_check and any(mask[17:47]):
-            poses_possibles = [j for j in range(17, 32) if mask[j]] or [j for j in range(32, 47) if mask[j]]
-            if poses_possibles:
-                action = poses_possibles[0]
-                print(f"-> OUVERTURE FORCÉE (Score atteint) : Action {action}")
+            if not a_joue_check:
+                action = 0
+                print("-> Doit piocher avant d'ouvrir (Action 0)")
             else:
-                action, _ = model.predict(obs, action_masks=mask, deterministic=True)
-                action = int(action)
-                print(f"-> Action ID : {action}")
+                poses_possibles = [j for j in range(17, 32) if mask[j]] or [j for j in range(32, 47) if mask[j]]
+                if poses_possibles:
+                    action = poses_possibles[0]
+                    print(f"-> OUVERTURE FORCÉE (Score atteint) : Action {action}")
+                else:
+                    action, _ = model.predict(obs, action_masks=mask, deterministic=True)
+                    action = int(action)
         else:
             action, _ = model.predict(obs, action_masks=mask, deterministic=True)
             action = int(action)
@@ -565,9 +568,10 @@ def jouer_coup():
                         _raw_wc_dispo = [c for c in etat_actuel['maMain'] if (c.get('estJoker') or c.get('valeur') == '2') and c['id'] not in used_ids]
                         _raw_wc_dispo.sort(key=lambda c: 0 if c.get('valeur') == '2' else 1)
                         dispo_wc = [c['id'] for c in _raw_wc_dispo]
-                        for val2 in VALEURS:
+                        valeurs_triees = sorted([v for v in VALEURS if v not in ['Joker', '2', '3R', '3N']], key=lambda x: POINTS_FACIAUX.get(x, 0), reverse=True)
+                        for val2 in valeurs_triees:
                             if pts_ouverture >= seuil: break
-                            if val2 == valeur_cible or val2 in ['Joker', '2', '3R', '3N']:
+                            if val2 == valeur_cible:
                                 continue
                             other_ids = [c['id'] for c in etat_actuel['maMain'] 
                                          if normaliser_valeur(c) == val2 and c['id'] not in used_ids]
@@ -625,9 +629,10 @@ def jouer_coup():
                         _raw_wc_dispo = [c for c in etat_actuel['maMain'] if (c.get('estJoker') or c.get('valeur') == '2') and c['id'] not in used_ids]
                         _raw_wc_dispo.sort(key=lambda c: 0 if c.get('valeur') == '2' else 1)
                         dispo_wc = [c['id'] for c in _raw_wc_dispo]
-                        for val2 in VALEURS:
+                        valeurs_triees = sorted([v for v in VALEURS if v not in ['Joker', '2', '3R', '3N']], key=lambda x: POINTS_FACIAUX.get(x, 0), reverse=True)
+                        for val2 in valeurs_triees:
                             if pts_ouverture >= seuil: break
-                            if val2 == valeur_cible or val2 in ['Joker', '2', '3R', '3N']:
+                            if val2 == valeur_cible:
                                 continue
                             other_ids = [c['id'] for c in etat_actuel['maMain'] 
                                          if normaliser_valeur(c) == val2 and c['id'] not in used_ids]
