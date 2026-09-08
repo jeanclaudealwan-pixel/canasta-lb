@@ -492,7 +492,7 @@ def jouer_coup():
                 action, _ = model.predict(obs, action_masks=mask, deterministic=True)
                 action = int(action)
                 print(f"-> Action ID : {action}")
-        elif not a_ouvert_check and peut_ouvrir:
+        elif not a_ouvert_check and any(mask[17:47]):
             poses_possibles = [j for j in range(17, 32) if mask[j]] or [j for j in range(32, 47) if mask[j]]
             if poses_possibles:
                 action = poses_possibles[0]
