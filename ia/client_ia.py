@@ -416,6 +416,19 @@ def jouer_coup():
         peut_legalement_sortir = notre_equipe_a_rouge and notre_equipe_a_noire
         
         # VÉRIFICATION RÉELLE SI ON PEUT VIDER LA MAIN
+        main = etat_actuel.get('maMain', [])
+        counts = {val: 0 for val in VALEURS}
+        wildcards = 0
+        for c in main:
+            val = normaliser_valeur(c)
+            if c.get('estJoker', False) or val == '2':
+                wildcards += 1
+                counts['Joker' if c.get('estJoker', False) else '2'] += 1
+            elif val in counts:
+                counts[val] += 1
+                
+        equipe_data = etat_actuel.get('equipes', {}).get(mon_equipe_id_check, {})
+        
         unmeldable_cards = 0
         for val, count in counts.items():
             if val in ['Joker', '2', '3R', '3N'] or count == 0:
