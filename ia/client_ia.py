@@ -350,14 +350,29 @@ def get_action_mask(etat):
         
         if a_ouvert:
             for i, val_meld in enumerate(VALEURS_MELD):
-                has_combo = any(meld.get('valeur') == val_meld for meld in table.values())
+                has_combo = False
+                nb_naturelles = 0
+                nb_atouts = 0
+                for meld in table.values():
+                    if meld.get('valeur') == val_meld:
+                        has_combo = True
+                        for c in meld.get('cartes', []):
+                            if c.get('estJoker', False) or c.get('valeur') == '2':
+                                nb_atouts += 1
+                            else:
+                                nb_naturelles += 1
+                        break
+                        
                 if not has_combo:
                     continue
+                    
                 if val_meld == '2':
                     if nb_2 > 0:
                         mask[47 + i] = True
                 else:
                     if counts.get(val_meld, 0) > 0:
+                        mask[47 + i] = True
+                    elif wildcards > 0 and nb_atouts < 2 and (nb_atouts + 1) < nb_naturelles:
                         mask[47 + i] = True
                         
     # --- RÈGLE DU REFUS DE SORTIE ---
@@ -400,9 +415,26 @@ def jouer_coup():
         veut_sortir = (danger_imminent or urgence_maximale or notre_equipe_a_rouge)
         peut_legalement_sortir = notre_equipe_a_rouge and notre_equipe_a_noire
         
+        # VÉRIFICATION RÉELLE SI ON PEUT VIDER LA MAIN
+        unmeldable_cards = 0
+        for val, count in counts.items():
+            if val in ['Joker', '2', '3R', '3N'] or count == 0:
+                continue
+            can_complete = False
+            for meld in equipe_data.get('table', {}).values():
+                if meld.get('valeur') == val:
+                    can_complete = True
+                    break
+            if not can_complete:
+                if count == 1:
+                    unmeldable_cards += 1
+                elif count == 2 and wildcards == 0:
+                    unmeldable_cards += 2
+
         # DEMANDE D'AUTORISATION POUR SORTIR
         a_joue_check = etat_actuel.get('aJoueCeTour', False)
-        if a_joue_check and a_ouvert_check and veut_sortir and peut_legalement_sortir and len(etat_actuel.get('maMain', [])) <= 6:
+        # On ne demande que si on a au maximum 1 carte "bloquante" (celle qu'on va jeter)
+        if a_joue_check and a_ouvert_check and veut_sortir and peut_legalement_sortir and unmeldable_cards <= 1:
             etat_auto = getattr(sio, 'autorisation_sortie', None)
             if etat_auto is None:
                 print("\n-> [IA] Je m'apprête à vider ma main. Je demande l'autorisation de sortir à mon partenaire...")
@@ -443,6 +475,15 @@ def jouer_coup():
             if poses_possibles:
                 action = poses_possibles[0]
                 print(f"-> {motif} : forçage d'une pose (Action {action})")
+            else:
+                action, _ = model.predict(obs, action_masks=mask, deterministic=True)
+                action = int(action)
+                print(f"-> Action ID : {action}")
+        elif not a_ouvert_check and peut_ouvrir:
+            poses_possibles = [j for j in range(17, 32) if mask[j]] or [j for j in range(32, 47) if mask[j]]
+            if poses_possibles:
+                action = poses_possibles[0]
+                print(f"-> OUVERTURE FORCÉE (Score atteint) : Action {action}")
             else:
                 action, _ = model.predict(obs, action_masks=mask, deterministic=True)
                 action = int(action)
@@ -597,14 +638,22 @@ def jouer_coup():
             valeur_cible = VALEURS_MELD[action - 47]
             cartes_ids = [
                 c['id'] for c in etat_actuel['maMain'] 
-                if c.get('valeur') == valeur_cible and not c.get('estJoker', False)
+                if normaliser_valeur(c) == valeur_cible
             ]
+            
+            # Si pas de carte naturelle, on tente avec un atout !
+            if len(cartes_ids) == 0:
+                for c in etat_actuel['maMain']:
+                    if c.get('estJoker', False) or c.get('valeur') == '2':
+                        cartes_ids.append(c['id'])
+                        break
+                        
             if len(cartes_ids) >= 1:
                 print(f"Action: Complète {valeur_cible} (+{len(cartes_ids)} cartes)")
                 sio.emit('demandeDescendreCombinaison', [{'cartesId': cartes_ids, 'valeur': valeur_cible}])
                 action_ok = True
             else:
-                print(f"ERREUR: Pas de {valeur_cible} en main pour compléter !")
+                print(f"ERREUR: Pas de {valeur_cible} ou d'atout en main pour compléter !")
         
         # Sécurité anti-blocage : si l'action locale a échoué, forcer une défausse
         if not action_ok:
