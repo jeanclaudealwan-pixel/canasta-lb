@@ -199,7 +199,7 @@ def get_action_mask(etat):
                     
     for val, compte in compte_visible.items():
         if val not in ['Joker', '2', '3N', '3R']:
-            if (12 - compte) <= 4:
+            if (8 - compte) <= 4:
                 cartes_safe.add(val)
                 
     # 3. Ce que l'adversaire (le joueur suivant) a déjà descendu = Safe
@@ -319,7 +319,7 @@ def get_action_mask(etat):
                             cartes_deja_posees = sum(1 for c in meld.get('cartes', []) if not c.get('estJoker', False) and c.get('valeur') != '2')
                     
                     cartes_nous = counts[val] + cartes_deja_posees
-                    cartes_restantes = 12 - compte_visible.get(val, 0)
+                    cartes_restantes = 8 - compte_visible.get(val, 0)
                     
                     # On a une chance très limitée de faire une pure s'il faut récupérer 100% des cartes restantes
                     # (Ex: On a 4 cartes. Il en reste 3 dans la pioche. 4+3 = 7. C'est le max absolu, très dur à faire)
@@ -373,7 +373,16 @@ def get_action_mask(etat):
                     if counts.get(val_meld, 0) > 0:
                         mask[47 + i] = True
                     elif wildcards > 0 and nb_atouts < 2 and (nb_atouts + 1) < nb_naturelles:
-                        mask[47 + i] = True
+                        # On vérifie si on a déjà une canasta pure
+                        notre_equipe_a_rouge = False
+                        for m in table.values():
+                            if m.get('estCanasta') and all(not c.get('estJoker', False) and str(c.get('valeur')) != '2' for c in m.get('cartes', [])):
+                                notre_equipe_a_rouge = True
+                                break
+                        
+                        # V3.8: On ne salit pas une pure sauf si on a déjà une rouge
+                        if nb_atouts > 0 or notre_equipe_a_rouge:
+                            mask[47 + i] = True
                         
     # --- RÈGLE DU REFUS DE SORTIE ---
     # Si le partenaire a dit NON, l'IA est forcée de garder au moins 2 cartes (donc interdit de descendre)
@@ -430,9 +439,12 @@ def jouer_coup():
         equipe_data = etat_actuel.get('equipes', {}).get(mon_equipe_id_check, {})
         
         unmeldable_cards = 0
+        pairs_in_hand = 0
         for val, count in counts.items():
             if val in ['Joker', '2', '3R', '3N'] or count == 0:
                 continue
+            if count >= 2:
+                pairs_in_hand += 1
             can_complete = False
             for meld in equipe_data.get('table', {}).values():
                 if meld.get('valeur') == val:
@@ -443,6 +455,17 @@ def jouer_coup():
                     unmeldable_cards += 1
                 elif count == 2 and wildcards == 0:
                     unmeldable_cards += 2
+                    
+        wildcard_capacity = 0
+        for meld in equipe_data.get('table', {}).values():
+            nb_nat = sum(1 for c in meld.get('cartes', []) if not c.get('estJoker') and str(c.get('valeur')) != '2')
+            nb_wc = sum(1 for c in meld.get('cartes', []) if c.get('estJoker') or str(c.get('valeur')) == '2')
+            cap = min(2 - nb_wc, nb_nat - nb_wc - 1)
+            if cap > 0:
+                wildcard_capacity += cap
+                
+        excess_wc = max(0, wildcards - (wildcard_capacity + pairs_in_hand))
+        unmeldable_cards += excess_wc
 
         # DEMANDE D'AUTORISATION POUR SORTIR
         a_joue_check = etat_actuel.get('aJoueCeTour', False)
