@@ -148,7 +148,28 @@ def get_action_mask(etat):
                 )
                 nb_requis = 3 if terre_gelee else 2
                 if nb_naturelles >= nb_requis:
-                    mask[1] = True
+                    peut_ramasser = True
+                    if not a_ouvert:
+                        seuil = equipe_data.get('seuilOuverture', 120)
+                        pts_simules = (nb_naturelles + 1) * POINTS_FACIAUX.get(val_dessus, 0)
+                        nb_j = counts.get('Joker', 0)
+                        nb_deux = counts.get('2', 0)
+                        for v in VALEURS:
+                            if v not in ['Joker', '2', '3R', '3N', val_dessus]:
+                                if counts[v] >= 3:
+                                    pts_simules += counts[v] * POINTS_FACIAUX.get(v, 0)
+                                elif counts[v] == 2:
+                                    if nb_j > 0:
+                                        pts_simules += (counts[v] * POINTS_FACIAUX.get(v, 0)) + 50
+                                        nb_j -= 1
+                                    elif nb_deux > 0:
+                                        pts_simules += (counts[v] * POINTS_FACIAUX.get(v, 0)) + 25
+                                        nb_deux -= 1
+                        if pts_simules < seuil:
+                            peut_ramasser = False
+
+                    if peut_ramasser:
+                        mask[1] = True
     # --- REPRODUCTION EXACTE DU MASQUE D'ENTRAÎNEMENT (Ninja Rules + Seuil) ---
     terre_gelee = etat.get('terreGelee', False)
     taille_defausse = etat.get('tailleDefausse', 0)
@@ -228,7 +249,7 @@ def get_action_mask(etat):
             pts_total = 0
             for val in VALEURS:
                 if val not in ['Joker', '2', '3R', '3N'] and counts[val] >= 3:
-                    pts_total += 3 * POINTS_FACIAUX.get(val, 0)
+                    pts_total += counts[val] * POINTS_FACIAUX.get(val, 0)
             
             taille_pioche = etat.get('taillePioche', 0)
             autoriser_impurs = True
@@ -246,12 +267,17 @@ def get_action_mask(etat):
                 nb_2 = counts.get('2', 0)
                 
                 for v in impurs_possibles:
-                    if nb_jokers > 0:
-                        pts_total += (2 * POINTS_FACIAUX.get(v, 0)) + 50
-                        nb_jokers -= 1
-                    elif nb_2 > 0:
-                        pts_total += (2 * POINTS_FACIAUX.get(v, 0)) + 25
-                        nb_2 -= 1
+                    atouts_utilises = 0
+                    pts_total += (counts[v] * POINTS_FACIAUX.get(v, 0)) # Base points
+                    
+                    while atouts_utilises < counts[v] and (nb_jokers > 0 or nb_2 > 0):
+                        if nb_jokers > 0:
+                            pts_total += 50
+                            nb_jokers -= 1
+                        elif nb_2 > 0:
+                            pts_total += 25
+                            nb_2 -= 1
+                        atouts_utilises += 1
                     
             if pts_total < seuil:
                 peut_ouvrir = False
@@ -305,6 +331,7 @@ def get_action_mask(etat):
                 if counts[val] > 0 and val in ['Joker', '2']:
                     mask[2 + i] = True if (counts['2'] == 0 or val == '2') else False
 
+        for i, val in enumerate(VALEURS):
             # ── DESCENDRE PUR (17-31) ──
             if val not in ['Joker', '2', '3R', '3N'] and counts[val] >= 3:
                 if a_ouvert or peut_ouvrir:
@@ -599,7 +626,17 @@ def jouer_coup():
                             other_ids = [c['id'] for c in etat_actuel['maMain'] 
                                          if normaliser_valeur(c) == val2 and c['id'] not in used_ids]
                             if len(other_ids) == 2 and len(dispo_wc) >= 1:
-                                impure_ids = other_ids + [dispo_wc.pop(0)]
+                                atouts_a_utiliser = 1
+                                # Si on a besoin de plus de points et qu'il reste un autre atout, on peut en mettre 2
+                                if len(dispo_wc) >= 2:
+                                    pts_simules = sum(POINTS_FACIAUX.get(normaliser_valeur(c), 0) for c in etat_actuel['maMain'] if c['id'] in other_ids)
+                                    # dispo_wc[0]
+                                    c_atout_1 = next(c for c in etat_actuel['maMain'] if c['id'] == dispo_wc[0])
+                                    pts_simules += POINTS_FACIAUX.get(normaliser_valeur(c_atout_1), 0)
+                                    if pts_ouverture + pts_simules < seuil:
+                                        atouts_a_utiliser = 2
+
+                                impure_ids = other_ids + [dispo_wc.pop(0) for _ in range(atouts_a_utiliser)]
                                 groupes.append({'cartesId': impure_ids})
                                 used_ids.update(impure_ids)
                                 pts_ouverture += sum(POINTS_FACIAUX.get(normaliser_valeur(c), 0) for c in etat_actuel['maMain'] if c['id'] in impure_ids)
@@ -660,7 +697,17 @@ def jouer_coup():
                             other_ids = [c['id'] for c in etat_actuel['maMain'] 
                                          if normaliser_valeur(c) == val2 and c['id'] not in used_ids]
                             if len(other_ids) == 2 and len(dispo_wc) >= 1:
-                                impure_ids = other_ids + [dispo_wc.pop(0)]
+                                atouts_a_utiliser = 1
+                                # Si on a besoin de plus de points et qu'il reste un autre atout, on peut en mettre 2
+                                if len(dispo_wc) >= 2:
+                                    pts_simules = sum(POINTS_FACIAUX.get(normaliser_valeur(c), 0) for c in etat_actuel['maMain'] if c['id'] in other_ids)
+                                    # dispo_wc[0]
+                                    c_atout_1 = next(c for c in etat_actuel['maMain'] if c['id'] == dispo_wc[0])
+                                    pts_simules += POINTS_FACIAUX.get(normaliser_valeur(c_atout_1), 0)
+                                    if pts_ouverture + pts_simules < seuil:
+                                        atouts_a_utiliser = 2
+
+                                impure_ids = other_ids + [dispo_wc.pop(0) for _ in range(atouts_a_utiliser)]
                                 groupes.append({'cartesId': impure_ids})
                                 used_ids.update(impure_ids)
                                 pts_ouverture += sum(POINTS_FACIAUX.get(normaliser_valeur(c), 0) for c in etat_actuel['maMain'] if c['id'] in impure_ids)
@@ -798,8 +845,30 @@ def on_alerte_jeu(msg):
 
 @sio.on('questionSortie')
 def on_question_sortie(demandeur):
-    print(f"\n-> [IA] Mon partenaire (Joueur {demandeur}) demande à sortir. J'accepte automatiquement !")
-    sio.emit('reponseSortie', {'accepte': True})
+    global etat_actuel
+    accepte = True
+    raison = ""
+    
+    if etat_actuel and 'maMain' in etat_actuel:
+        main = etat_actuel['maMain']
+        pts_penalite = 0
+        for c in main:
+            val = normaliser_valeur(c)
+            pts_penalite += POINTS_FACIAUX.get(val, 0)
+        
+        # Si l'IA a plus de 75 points en main, elle refuse.
+        if pts_penalite >= 75:
+            accepte = False
+            raison = f" (J'ai {pts_penalite} points en main, c'est trop risqué !)"
+        else:
+            raison = f" (Je n'ai que {pts_penalite} points, vas-y !)"
+
+    if accepte:
+        print(f"\n-> [IA] Mon partenaire (Joueur {demandeur}) demande à sortir. J'ACCEPTE !{raison}")
+    else:
+        print(f"\n-> [IA] Mon partenaire (Joueur {demandeur}) demande à sortir. JE REFUSE !{raison}")
+        
+    sio.emit('reponseSortie', {'accepte': accepte})
 
 @sio.on('resultatSortie')
 def on_resultat_sortie(data):
