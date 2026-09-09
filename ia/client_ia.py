@@ -331,6 +331,7 @@ def get_action_mask(etat):
                 if counts[val] > 0 and val in ['Joker', '2']:
                     mask[2 + i] = True if (counts['2'] == 0 or val == '2') else False
 
+        for i, val in enumerate(VALEURS):
             # ── DESCENDRE PUR (17-31) ──
             if val not in ['Joker', '2', '3R', '3N'] and counts[val] >= 3:
                 if a_ouvert or peut_ouvrir:
