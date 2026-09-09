@@ -352,12 +352,35 @@ def get_action_mask(etat):
                     # (Ex: On a 4 cartes. Il en reste 3 dans la pioche. 4+3 = 7. C'est le max absolu, très dur à faire)
                     chance_limitee = (cartes_nous + cartes_restantes <= 7)
                     
+                    cartes_adv = 0
+                    autre_equipe_id_check = '1' if str(mon_equipe_id) == '2' else '2'
+                    table_adv = etat.get('equipes', {}).get(autre_equipe_id_check, {}).get('table', {})
+                    for meld in table_adv.values():
+                        if meld.get('valeur') == val:
+                            cartes_adv = sum(1 for c in meld.get('cartes', []) if not c.get('estJoker', False) and str(c.get('valeur')) != '2')
+                    
+                    # Une canasta pure demande 7 cartes sur les 8 du jeu.
+                    # Si l'adversaire en a déjà posé 2 ou plus, c'est mort.
+                    chance_limitee = (cartes_adv >= 2)
+                    
                     notre_equipe_a_rouge = False
-                    for meld in equipe_data.get('table', {}).values():
-                        if meld.get('estCanasta') and all(not c.get('estJoker', False) and str(c.get('valeur')) != '2' for c in meld.get('cartes', [])):
+                    for m in equipe_data.get('table', {}).values():
+                        if m.get('estCanasta') and all(not c.get('estJoker', False) and str(c.get('valeur')) != '2' for c in m.get('cartes', [])):
                             notre_equipe_a_rouge = True
+                            break
 
-                    if chance_limitee or notre_equipe_a_rouge:
+                    adv_a_rouge = False
+                    adv_a_noire = False
+                    for m in table_adv.values():
+                        if m.get('estCanasta'):
+                            if all(not c.get('estJoker', False) and str(c.get('valeur')) != '2' for c in m.get('cartes', [])):
+                                adv_a_rouge = True
+                            else:
+                                adv_a_noire = True
+                    
+                    urgence = adv_a_rouge and adv_a_noire
+
+                    if notre_equipe_a_rouge or urgence or chance_limitee:
                         mask[32 + i] = True
                     else:
                         mask[32 + i] = False
@@ -406,9 +429,17 @@ def get_action_mask(etat):
                             if m.get('estCanasta') and all(not c.get('estJoker', False) and str(c.get('valeur')) != '2' for c in m.get('cartes', [])):
                                 notre_equipe_a_rouge = True
                                 break
+                                
+                        cartes_adv = 0
+                        autre_equipe_id_check = '1' if str(mon_equipe_id) == '2' else '2'
+                        table_adv = etat.get('equipes', {}).get(autre_equipe_id_check, {}).get('table', {})
+                        for m in table_adv.values():
+                            if m.get('valeur') == val_meld:
+                                cartes_adv = sum(1 for c in m.get('cartes', []) if not c.get('estJoker', False) and str(c.get('valeur')) != '2')
+                        chance_limitee = (cartes_adv >= 2)
                         
-                        # V3.8: On ne salit pas une pure sauf si on a déjà une rouge
-                        if nb_atouts > 0 or notre_equipe_a_rouge:
+                        # V3.8: On ne salit pas une pure sauf si on a déjà une rouge ou si impossible de la faire pure
+                        if nb_atouts > 0 or notre_equipe_a_rouge or chance_limitee:
                             mask[47 + i] = True
                         
     # --- RÈGLE DU REFUS DE SORTIE ---
