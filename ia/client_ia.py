@@ -497,23 +497,31 @@ def jouer_coup():
         equipe_data = etat_actuel.get('equipes', {}).get(mon_equipe_id_check, {})
         
         unmeldable_cards = 0
-        pairs_in_hand = 0
+        dispo_wc = wildcards
+        
+        # Les 3 Noirs ne peuvent être que défaussés
+        nb_3n = counts.get('3 Noir', 0) + counts.get('3N', 0)
+        unmeldable_cards += nb_3n
+        
         for val, count in counts.items():
-            if val in ['Joker', '2', '3R', '3N'] or count == 0:
+            if val in ['Joker', '2', '3R', '3N', '3 Noir', '3 Rouge'] or count == 0:
                 continue
-            if count >= 2:
-                pairs_in_hand += 1
+                
             can_complete = False
             for meld in equipe_data.get('table', {}).values():
                 if meld.get('valeur') == val:
                     can_complete = True
                     break
+                    
             if not can_complete:
                 if count == 1:
                     unmeldable_cards += 1
-                elif count == 2 and wildcards == 0:
-                    unmeldable_cards += 2
-                    
+                elif count == 2:
+                    if dispo_wc > 0:
+                        dispo_wc -= 1
+                    else:
+                        unmeldable_cards += 2
+                        
         wildcard_capacity = 0
         for meld in equipe_data.get('table', {}).values():
             nb_nat = sum(1 for c in meld.get('cartes', []) if not c.get('estJoker') and str(c.get('valeur')) != '2')
@@ -522,7 +530,7 @@ def jouer_coup():
             if cap > 0:
                 wildcard_capacity += cap
                 
-        excess_wc = max(0, wildcards - (wildcard_capacity + pairs_in_hand))
+        excess_wc = max(0, dispo_wc - wildcard_capacity)
         unmeldable_cards += excess_wc
 
         # DEMANDE D'AUTORISATION POUR SORTIR
