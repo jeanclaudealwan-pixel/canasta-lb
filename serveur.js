@@ -530,17 +530,56 @@ function quitterLeSalon(socketId) {
                     votants: []
                 };
                 
-                diffuserMessageGlobal(salon, `${profil.pseudo} s'est déconnecté(e) (connexion perdue).`);
+                diffuserMessageGlobal(salon, ${profil.pseudo} s'est déconnecté(e) (connexion perdue).);
                 
-                // Envoyer la demande de vote aux autres joueurs humains
+                let nbHumains = 0;
                 for (let sId in salon.joueurs) {
                     if (!sId.startsWith('bot-')) {
+                        nbHumains++;
                         io.to(sId).emit('demandeVoteDeconnexion', {
                             numeroJoueur: numeroLibere,
                             pseudo: profil.pseudo
                         });
                     }
                 }
+                
+                // NOUVEAU: Si on est le seul humain, ou pas d'autres humains, on simule un vote "attendre" automatique
+                if (nbHumains === 0) {
+                    salon.enAttenteReconnexion = numeroLibere;
+                    diffuserMessageGlobal(salon, Décision : On attend le retour de .);
+                    let t = setTimeout(() => {
+                        if (salon && salon.enAttenteReconnexion === numeroLibere) {
+                            diffuserMessageGlobal(salon, Le temps d'attente est écoulé. Remplacement par un Bot.);
+                            salon.enAttenteReconnexion = null;
+                            const sIdBot = 'bot-' + Date.now() + Math.floor(Math.random()*1000);
+                            salon.joueurs[sIdBot] = numeroLibere;
+                            salon.bots = salon.bots || {};
+                            salon.bots[numeroLibere] = new BotJoueur(numeroLibere, salon, io);
+                            envoyerMiseAJourSalon(salon);
+                            diffuserEtatGlobal(salon);
+                            if (salon.partie && salon.partie.tourActuel === numeroLibere && !salon.partie.aJoueCeTour) {
+                                salon.bots[numeroLibere].jouerTour();
+                            }
+                        }
+                    }, 120000);
+                    
+                    if (profil.token) {
+                        deconnexionsPendantPartie[profil.token] = {
+                            roomId: salon.id,
+                            numero: numeroLibere,
+                            timeout: t
+                        };
+                    }
+                } else {
+                    if (profil.token) {
+                        deconnexionsPendantPartie[profil.token] = {
+                            roomId: salon.id,
+                            numero: numeroLibere,
+                            timeout: null
+                        };
+                    }
+                }
+                
                 envoyerMiseAJourSalon(salon);
                 diffuserEtatGlobal(salon);
             }

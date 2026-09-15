@@ -354,8 +354,17 @@ document.getElementById('btn-sortir').addEventListener('click', () => {
 });
 
 function autoGroupCartes(ids, extraCard = null) {
-    let selected = ids.map(id => etatGlobal.maMain.find(c => c.id === id)).filter(Boolean);
-    if (extraCard) selected.push(extraCard);
+    let selected = [];
+    ids.forEach(id => {
+        let c = etatGlobal.maMain.find(carte => carte.id === id);
+        if (!c && etatGlobal.carteDessusDefausse && etatGlobal.carteDessusDefausse.id === id) {
+            c = etatGlobal.carteDessusDefausse;
+        }
+        if (c) selected.push(c);
+    });
+    if (extraCard && !selected.some(c => c.id === extraCard.id)) {
+        selected.push(extraCard);
+    }
     
     // NOUVEAU : on trie toujours les cartes par valeur pour que les cartes identiques 
     // (ex: les 10 de la main et le 10 de la terre) soient toujours côte à côte, 
@@ -376,11 +385,44 @@ function autoGroupCartes(ids, extraCard = null) {
             activeGroup = null;
         }
 
-        if (c.valeur === 'Joker') {
-            // Un Joker est toujours un wildcard
-            if (activeGroup) {
-                activeGroup.cartesId.push(c.id);
-            } else {
+        if (c.valeur === 'Joker' || c.valeur === '2') {
+            // Un Joker ou un 2 (utilisé comme wildcard) doit aller en priorité dans un groupe qui en a besoin (longueur < 3)
+            let targetGroup = activeGroup;
+            
+            // Si la carte est un '2', vérifier d'abord si on peut former un groupe pur de '2'
+            let handledAsNatural2 = false;
+            if (c.valeur === '2') {
+                if (activeGroup && activeGroup.valeur === '2') {
+                    activeGroup.cartesId.push(c.id);
+                    handledAsNatural2 = true;
+                } else {
+                    let indexOrphan2 = orphanWildcards.findIndex(w => w.valeur === '2');
+                    if (indexOrphan2 !== -1) {
+                        let prev2 = orphanWildcards.splice(indexOrphan2, 1)[0];
+                        let newGroup = { valeur: '2', cartesId: [prev2.id, c.id] };
+                        groups.push(newGroup);
+                        activeGroup = newGroup;
+                        if (orphanWildcards.length > 0) {
+                            orphanWildcards.forEach(w => activeGroup.cartesId.push(w.id));
+                            orphanWildcards = [];
+                        }
+                        handledAsNatural2 = true;
+                    }
+                }
+            }
+            
+            if (!handledAsNatural2) {
+                // Trouver le premier groupe qui a moins de 3 cartes
+                let needyGroup = groups.find(g => g.cartesId.length < 3);
+                if (needyGroup) {
+                    needyGroup.cartesId.push(c.id);
+                } else if (activeGroup) {
+                    activeGroup.cartesId.push(c.id);
+                } else {
+                    orphanWildcards.push(c);
+                }
+            }
+        } else {
                 orphanWildcards.push(c);
             }
         } else if (c.valeur === '2') {
@@ -598,9 +640,15 @@ if (btnJeterElem) {
 }
 
 document.getElementById('btn-lock').addEventListener('click', () => {
-    if (cartesSelectionnees.size >= 3) {
+    let size = cartesSelectionnees.size + (terreSelectionnee ? 1 : 0);
+    if (size >= 3) {
         const arrayIds = Array.from(cartesSelectionnees);
-        const grouped = autoGroupCartes(arrayIds);
+        let extraCard = null;
+        if (terreSelectionnee && etatGlobal.carteDessusDefausse) {
+            extraCard = etatGlobal.carteDessusDefausse;
+            terreSelectionnee = false; // La carte de terre est intégrée au groupe verrouillé
+        }
+        const grouped = autoGroupCartes(arrayIds, extraCard);
         
         grouped.forEach(g => {
             if (g.cartesId.length > 0) {
@@ -1021,7 +1069,8 @@ function mettreAJourBoutons() {
         }
         const btnLock = document.getElementById('btn-lock');
         if (btnLock) {
-            if (cartesSelectionnees.size >= 3) {
+            let size = cartesSelectionnees.size + (terreSelectionnee ? 1 : 0);
+            if (size >= 3) {
                 btnLock.style.display = 'block';
             } else {
                 btnLock.style.display = 'none';
@@ -1753,23 +1802,32 @@ function afficherRecap(recap) {
     for (let eq of [1, 2]) {
         let d = recap.equipes[eq];
         if (!d) continue;
-        html += `<div style="flex:1; min-width:250px; background:rgba(0,0,0,0.2); padding:15px; border-radius:10px;">`;
-        html += `<h3 style="color:${eq===etatGlobal.monEquipe?'#3498db':'#e74c3c'}; margin-top:0; text-align:center;">${eq===etatGlobal.monEquipe?'Notre Équipe':'Adversaires'}</h3>`;
-        html += `<div class="ligne-score reveal"><span>3 Rouges :</span><span>${d.detail.troisRouges}</span></div>`;
-        let signPose = d.detail.pointsEnArriere ? '-' : '';
-        html += `<div class="ligne-score reveal"><span>Posé :</span><span style="color:${d.detail.pointsEnArriere?'indianred':'inherit'}">${signPose}${d.detail.valeurCombinaisons}</span></div>`;
         
-        let pures = d.detail.canastas.filter(c=>c.pure).reduce((s,c)=>s+c.points,0);
-        let impures = d.detail.canastas.filter(c=>!c.pure).reduce((s,c)=>s+c.points,0);
+        let detail = d.detail || {};
+        let troisRouges = detail.troisRouges || 0;
+        let pointsEnArriere = detail.pointsEnArriere || false;
+        let valeurCombinaisons = detail.valeurCombinaisons || 0;
+        let bonusSortie = detail.bonusSortie || 0;
+        let valeurMainRestante = detail.valeurMainRestante || 0;
+        let canastas = detail.canastas || [];
+        
+        html += `<div style="flex:1; min-width:250px; background:rgba(0,0,0,0.2); padding:15px; border-radius:10px;">`;
+        html += `<h3 style="color:${(etatGlobal && eq===etatGlobal.monEquipe)?'#3498db':'#e74c3c'}; margin-top:0; text-align:center;">${(etatGlobal && eq===etatGlobal.monEquipe)?'Notre équipe':'Adversaires'}</h3>`;
+        html += `<div class="ligne-score reveal"><span>3 Rouges :</span><span>${troisRouges}</span></div>`;
+        let signPose = pointsEnArriere ? '-' : '';
+        html += `<div class="ligne-score reveal"><span>Posé :</span><span style="color:${pointsEnArriere?'indianred':'inherit'}">${signPose}${valeurCombinaisons}</span></div>`;
+        
+        let pures = canastas.filter(c=>c.pure).reduce((s,c)=>s+c.points,0);
+        let impures = canastas.filter(c=>!c.pure).reduce((s,c)=>s+c.points,0);
         html += `<div class="ligne-score reveal"><span>Canastas Pures :</span><span>${pures}</span></div>`;
         html += `<div class="ligne-score reveal"><span>Canastas Impures :</span><span>${impures}</span></div>`;
         
-        if (d.detail.bonusSortie) {
-            html += `<div class="ligne-score reveal" style="color:var(--gold)"><span>Sortie :</span><span>${d.detail.bonusSortie}</span></div>`;
+        if (bonusSortie) {
+            html += `<div class="ligne-score reveal" style="color:var(--gold)"><span>Sortie :</span><span>${bonusSortie}</span></div>`;
         }
-        html += `<div class="ligne-score reveal" style="color:var(--red)"><span>Main restante :</span><span>-${d.detail.valeurMainRestante}</span></div>`;
-        html += `<div class="ligne-score reveal" style="margin-top:10px;"><span>TOTAL MANCHE :</span><span>${d.pointsManche}</span></div>`;
-        html += `<div class="ligne-score reveal" style="color:var(--gold); font-size:1.2em;"><span>SCORE GLOBAL :</span><span>${d.scoreTotal}</span></div>`;
+        html += `<div class="ligne-score reveal" style="color:var(--red)"><span>Main restante :</span><span>-${valeurMainRestante}</span></div>`;
+        html += `<div class="ligne-score reveal" style="margin-top:10px;"><span>TOTAL MANCHE :</span><span>${d.pointsManche || 0}</span></div>`;
+        html += `<div class="ligne-score reveal" style="color:var(--gold); font-size:1.2em;"><span>SCORE GLOBAL :</span><span>${d.scoreTotal || 0}</span></div>`;
         html += `</div>`;
     }
     html += '</div>';
@@ -1782,8 +1840,8 @@ function afficherRecap(recap) {
         btn.disabled = false;
     } else {
         const hoteActuel = window.idHoteActuel || (etatGlobal && etatGlobal.hote);
-        if (hoteActuel === socket.id) {
-            btn.textContent = 'Continuer ▶';
+        if (socket && hoteActuel === socket.id) {
+            btn.textContent = 'Continuer ?';
             btn.style.background = 'var(--green)';
             btn.disabled = false;
         } else {
@@ -1806,15 +1864,21 @@ function afficherRecap(recap) {
         const cible = parseInt(span.textContent);
         if (isNaN(cible)) return;
         
-        let depart = 0;
-        const duree = 700, t0 = performance.now();
-        function step(t) {
-            const p = Math.min((t - t0) / duree, 1);
-            span.textContent = Math.round(depart + (cible - depart) * p);
-            if (p < 1) requestAnimationFrame(step);
-            else { span.textContent = cible; sons.jouer('select'); }
-        }
-        requestAnimationFrame(step);
+        let actuel = 0;
+        span.textContent = '0';
+        const duree = 1000;
+        const frames = 30;
+        const increment = cible / frames;
+        let frame = 0;
+        const timer = setInterval(() => {
+            frame++;
+            actuel += increment;
+            span.textContent = Math.round(actuel);
+            if (frame >= frames) {
+                clearInterval(timer);
+                span.textContent = cible;
+            }
+        }, duree / frames);
     });
 }
 
@@ -1837,37 +1901,58 @@ document.getElementById('btn-fermer-scores').addEventListener('click', () => {
 function afficherVictoire(vainqueur, equipes) {
     document.getElementById('modal-overlay').style.display = 'flex';
     document.getElementById('modal-victoire').style.display = 'block';
-    sons.jouer('victoire');
-    if (vainqueur === etatGlobal.monEquipe && typeof confetti === 'function') {
+    if (typeof sons !== 'undefined' && sons.jouer) sons.jouer('victoire');
+    
+    let isVainqueurMoi = (etatGlobal && vainqueur === etatGlobal.monEquipe);
+    
+    if (isVainqueurMoi && typeof confetti === 'function') {
         confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 } });
     }
     
     const txt = document.getElementById('texte-victoire');
-    if (vainqueur === etatGlobal.monEquipe) {
-        txt.innerHTML = `Félicitations ! Votre équipe a gagné avec ${equipes[vainqueur].score} points !`;
+    let scoreVainqueur = (equipes && equipes[vainqueur] && equipes[vainqueur].score) || 0;
+    
+    if (isVainqueurMoi) {
+        txt.innerHTML = `Félicitations ! Votre équipe a gagné avec ${scoreVainqueur} points !`;
         txt.style.color = "var(--green)";
     } else {
-        txt.innerHTML = `Dommage... L'équipe adverse gagne avec ${equipes[vainqueur].score} points.`;
+        txt.innerHTML = `Dommage... L'équipe adverse gagne avec ${scoreVainqueur} points.`;
         txt.style.color = "var(--red)";
     }
     
     // Update stats in localStorage
     if (!window.statsMisesAJour) {
         window.statsMisesAJour = true; // Prevent double trigger
-        let stats = JSON.parse(localStorage.getItem('canastaStats') || '{"jouees":0, "gagnees":0, "meilleurScore":0, "xp":0}');
+        let stats = {jouees:0, gagnees:0, meilleurScore:0, xp:0};
+        try {
+            stats = JSON.parse(localStorage.getItem('canastaStats') || '{"jouees":0, "gagnees":0, "meilleurScore":0, "xp":0}');
+        } catch(e) {}
+        
         stats.jouees = (stats.jouees || 0) + 1;
-        if (vainqueur === etatGlobal.monEquipe) {
+        if (isVainqueurMoi) {
             stats.gagnees = (stats.gagnees || 0) + 1;
             stats.xp = (stats.xp || 0) + 150;
         } else {
             stats.xp = (stats.xp || 0) + 25;
         }
-        if (equipes[etatGlobal.monEquipe].score > (stats.meilleurScore || 0)) {
-            stats.meilleurScore = equipes[etatGlobal.monEquipe].score;
+        
+        let monScore = 0;
+        if (etatGlobal && equipes && equipes[etatGlobal.monEquipe]) {
+            monScore = equipes[etatGlobal.monEquipe].score || 0;
+        }
+        
+        if (monScore > (stats.meilleurScore || 0)) {
+            stats.meilleurScore = monScore;
         }
         localStorage.setItem('canastaStats', JSON.stringify(stats));
-        mettreAJourStatsUI();
+        
+        // Mettre à jour l'affichage si on est sur l'accueil
+        const statJouees = document.getElementById('stat-jouees');
+        if (statJouees) statJouees.textContent = stats.jouees;
+        const statRecord = document.getElementById('stat-record');
+        if (statRecord) statRecord.textContent = stats.meilleurScore;
     }
+    mettreAJourStatsUI();
 }
 
 document.getElementById('btn-retour-lobby').addEventListener('click', () => {
