@@ -532,7 +532,13 @@ function quitterLeSalon(socketId) {
                         salon.enAttenteReconnexion = null;
                         
                         const pythonProcess = spawn('python3', ['client_ia.py', salon.id, numeroLibere.toString()], {
-                            cwd: path.join(__dirname, 'ia')
+                            cwd: path.join(__dirname, 'ia'),
+                            env: { ...process.env, CANASTA_URL: `http://localhost:${process.env.PORT || 3000}` }
+                        });
+                        
+                        pythonProcess.on('error', (err) => {
+                            console.error(`[IA ${salon.id} ERROR]: Impossible de lancer python3:`, err);
+                            diffuserMessageGlobal(salon, `Erreur critique: Impossible de démarrer l'IA Python.`);
                         });
                         
                         pythonProcess.stdout.on('data', (data) => console.log(`[IA ${salon.id} stdout]: ${data}`));
@@ -682,8 +688,15 @@ io.on('connection', (socket) => {
                             diffuserMessageGlobal(salon, `${profil.pseudo} a abandonné la partie. Remplacement par l'IA Python.`);
                             
                             const pythonProcess = spawn('python3', ['client_ia.py', salon.id, numeroLibere.toString()], {
-                                cwd: path.join(__dirname, 'ia')
+                                cwd: path.join(__dirname, 'ia'),
+                                env: { ...process.env, CANASTA_URL: `http://localhost:${process.env.PORT || 3000}` }
                             });
+                            
+                            pythonProcess.on('error', (err) => {
+                                console.error(`[IA ${salon.id} ERROR]: Impossible de lancer python3:`, err);
+                                diffuserMessageGlobal(salon, `Erreur critique: Impossible de démarrer l'IA Python.`);
+                            });
+                            
                             pythonProcess.stdout.on('data', (data) => console.log(`[IA ${salon.id} stdout]: ${data}`));
                             pythonProcess.stderr.on('data', (data) => console.error(`[IA ${salon.id} stderr]: ${data}`));
                         }
@@ -971,7 +984,13 @@ io.on('connection', (socket) => {
         if (salon.placesDisponibles.length > 0) {
             console.log(`Lancement de l'IA Python pour le salon ${salon.id}`);
             const pythonProcess = spawn('python3', ['client_ia.py', salon.id], {
-                cwd: path.join(__dirname, 'ia')
+                cwd: path.join(__dirname, 'ia'),
+                env: { ...process.env, CANASTA_URL: `http://localhost:${process.env.PORT || 3000}` }
+            });
+            
+            pythonProcess.on('error', (err) => {
+                console.error(`[IA ${salon.id} ERROR]: Impossible de lancer python3:`, err);
+                socket.emit('alerteJeu', `Erreur critique: Impossible de démarrer l'IA Python ('python3' non trouvé).`);
             });
             
             pythonProcess.stdout.on('data', (data) => {
@@ -984,6 +1003,9 @@ io.on('connection', (socket) => {
             
             pythonProcess.on('close', (code) => {
                 console.log(`[IA ${salon.id}] processus arrete (code ${code})`);
+                if (code !== 0) {
+                    socket.emit('alerteJeu', `L'IA n'a pas pu démarrer (Code d'erreur ${code}). Vérifiez si 'python3' et les modules (stable-baselines3, etc.) sont bien installés sur votre serveur.`);
+                }
             });
         }
     });
