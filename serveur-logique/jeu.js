@@ -286,8 +286,7 @@ class PartieCanasta {
             }
             const resultat = this._validerLotDeGroupes(groupesOuverture, poolDisponible, numEquipe, { verifierSeuil: true, exigerPaireEtCarte: { cartesRequises, carteDessus } });
             if (!resultat.ok) {
-                joueur.aPerduDroitOuverture = true;
-                return { ok: false, erreur: "Ouverture invalide : " + resultat.erreur + " Tu as perdu le droit d'ouvrir pour cette manche." };
+                return { ok: false, erreur: "Ouverture invalide : " + resultat.erreur };
             }
             groupesValides = resultat.groupes;
         } else if (groupesOuverture && groupesOuverture.length > 0) {
@@ -340,18 +339,13 @@ class PartieCanasta {
         const numEquipe = this.equipeDuJoueur(numJoueur);
         const equipe = this.equipes[numEquipe];
 
-        if (!equipe.aOuvert && joueur.aPerduDroitOuverture) {
-            return { ok: false, erreur: "Suite à un faux départ de ton partenaire, tu as perdu le droit d'ouvrir de ta main. Tu dois obligatoirement ramasser la terre pour ouvrir." };
-        }
-
         const poolDisponible = new Map();
         for (const c of joueur.main) poolDisponible.set(c.id, c);
 
         const resultat = this._validerLotDeGroupes(groupes, poolDisponible, numEquipe, { verifierSeuil: !equipe.aOuvert });
         if (!resultat.ok) {
             if (!equipe.aOuvert) {
-                joueur.aFaitFauxDepart = true;
-                return { ok: false, echecOuverture: true, erreur: "Ouverture invalide : " + resultat.erreur + " (Si tu termines ton tour sans ouvrir, ton partenaire sera pénalisé)." };
+                return { ok: false, echecOuverture: true, erreur: "Ouverture invalide : " + resultat.erreur };
             }
             return resultat;
         }
@@ -597,12 +591,6 @@ class PartieCanasta {
                 return { ok: false, erreur: "Tu ne peux pas terminer la manche sans que ton équipe ait au moins une Canasta Pure ET une Canasta Impure." };
             }
         }
-
-        if (joueur.aFaitFauxDepart && !this.equipes[numEquipe].aOuvert) {
-            const partenaireNum = this.equipes[numEquipe].membres.find(m => m !== numJoueur);
-            this.joueurs[partenaireNum].aPerduDroitOuverture = true;
-        }
-        joueur.aFaitFauxDepart = false;
 
         joueur.main.splice(idx, 1);
         this.defausse.push(carte);

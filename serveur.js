@@ -373,7 +373,7 @@ function gererFinManche(salon, resultat) {
         let vainqueur = salon.partie.vainqueur;
         for (let sId in salon.joueurs) {
             if (!sId.startsWith('bot-') && profilsJoueurs[sId] && profilsJoueurs[sId].dbId) {
-                let eq = salon.partie.joueurs[salon.joueurs[sId]].equipe;
+                let eq = salon.partie.equipeDuJoueur(salon.joueurs[sId]);
                 let isWin = (eq === vainqueur);
                 let score = salon.partie.equipes[eq].score;
                 db.updateUserStats(profilsJoueurs[sId].dbId, isWin, score);
@@ -523,61 +523,29 @@ function quitterLeSalon(socketId) {
                 };
                 delete salon.joueurs[socketId]; // Libère le socket
                 
-                salon.votesDeconnexion = salon.votesDeconnexion || {};
-                salon.votesDeconnexion[numeroLibere] = {
-                    attendre: 0,
-                    bot: 0,
-                    votants: []
-                };
+                salon.enAttenteReconnexion = numeroLibere;
+                diffuserMessageGlobal(salon, `${profil.pseudo} s'est déconnecté(e). En attente de reconnexion (60s)...`);
                 
-                diffuserMessageGlobal(salon, ${profil.pseudo} s'est déconnecté(e) (connexion perdue).);
-                
-                let nbHumains = 0;
-                for (let sId in salon.joueurs) {
-                    if (!sId.startsWith('bot-')) {
-                        nbHumains++;
-                        io.to(sId).emit('demandeVoteDeconnexion', {
-                            numeroJoueur: numeroLibere,
-                            pseudo: profil.pseudo
+                let t = setTimeout(() => {
+                    if (salon && salon.enAttenteReconnexion === numeroLibere) {
+                        diffuserMessageGlobal(salon, `Le temps d'attente est écoulé. Remplacement de ${profil.pseudo} par l'IA Python.`);
+                        salon.enAttenteReconnexion = null;
+                        
+                        const pythonProcess = spawn('python3', ['client_ia.py', salon.id, numeroLibere.toString()], {
+                            cwd: path.join(__dirname, 'ia')
                         });
+                        
+                        pythonProcess.stdout.on('data', (data) => console.log(`[IA ${salon.id} stdout]: ${data}`));
+                        pythonProcess.stderr.on('data', (data) => console.error(`[IA ${salon.id} stderr]: ${data}`));
                     }
-                }
+                }, 60000); // 60 seconds
                 
-                // NOUVEAU: Si on est le seul humain, ou pas d'autres humains, on simule un vote "attendre" automatique
-                if (nbHumains === 0) {
-                    salon.enAttenteReconnexion = numeroLibere;
-                    diffuserMessageGlobal(salon, Décision : On attend le retour de .);
-                    let t = setTimeout(() => {
-                        if (salon && salon.enAttenteReconnexion === numeroLibere) {
-                            diffuserMessageGlobal(salon, Le temps d'attente est écoulé. Remplacement par un Bot.);
-                            salon.enAttenteReconnexion = null;
-                            const sIdBot = 'bot-' + Date.now() + Math.floor(Math.random()*1000);
-                            salon.joueurs[sIdBot] = numeroLibere;
-                            salon.bots = salon.bots || {};
-                            salon.bots[numeroLibere] = new BotJoueur(numeroLibere, salon, io);
-                            envoyerMiseAJourSalon(salon);
-                            diffuserEtatGlobal(salon);
-                            if (salon.partie && salon.partie.tourActuel === numeroLibere && !salon.partie.aJoueCeTour) {
-                                salon.bots[numeroLibere].jouerTour();
-                            }
-                        }
-                    }, 120000);
-                    
-                    if (profil.token) {
-                        deconnexionsPendantPartie[profil.token] = {
-                            roomId: salon.id,
-                            numero: numeroLibere,
-                            timeout: t
-                        };
-                    }
-                } else {
-                    if (profil.token) {
-                        deconnexionsPendantPartie[profil.token] = {
-                            roomId: salon.id,
-                            numero: numeroLibere,
-                            timeout: null
-                        };
-                    }
+                if (profil.token) {
+                    deconnexionsPendantPartie[profil.token] = {
+                        roomId: salon.id,
+                        numero: numeroLibere,
+                        timeout: t
+                    };
                 }
                 
                 envoyerMiseAJourSalon(salon);
@@ -655,14 +623,20 @@ io.on('connection', (socket) => {
                         joueursDansSalons[socket.id] = salon.id;
                         delete salon.deconnexions[num];
                         
-                        // S'il y a un bot qui avait pris sa place, on le vire
-                        let botId = Object.keys(salon.joueurs).find(s => s.startsWith('bot-') && salon.joueurs[s] === numeroLibere);
-                        if (botId) {
-                            delete salon.joueurs[botId];
-                            if (salon.bots && salon.bots[numeroLibere]) {
-                                salon.bots[numeroLibere].desactive = true; // Empêche le bot de continuer s'il est au milieu d'un tour
-                                delete salon.bots[numeroLibere];
+                        // S'il y a un occupant (IA ou bot) qui avait pris sa place, on le vire
+                        let occupantId = Object.keys(salon.joueurs).find(s => s !== socket.id && salon.joueurs[s] === numeroLibere);
+                        if (occupantId) {
+                            if (occupantId.startsWith('bot-')) {
+                                if (salon.bots && salon.bots[numeroLibere]) {
+                                    salon.bots[numeroLibere].desactive = true;
+                                    delete salon.bots[numeroLibere];
+                                }
+                            } else {
+                                // C'est l'IA Python ou un autre socket
+                                io.to(occupantId).emit('alerteJeu', 'Le joueur original est de retour. Vous êtes déconnecté.');
+                                io.sockets.sockets.get(occupantId)?.disconnect();
                             }
+                            delete salon.joueurs[occupantId];
                             diffuserMessageGlobal(salon, `${profil.pseudo} s'est reconnecté(e) et a repris sa place !`);
                         } else {
                             diffuserMessageGlobal(salon, `${profil.pseudo} s'est reconnecté(e) !`);
@@ -705,29 +679,13 @@ io.on('connection', (socket) => {
                         delete salon.deconnexions[num];
                         if (salon.enAttenteReconnexion === numeroLibere) {
                             salon.enAttenteReconnexion = null;
-                            diffuserMessageGlobal(salon, `${profil.pseudo} a abandonné la partie. Remplacement par un Bot.`);
-                            const sIdBot = 'bot-' + Date.now() + Math.floor(Math.random()*1000);
-                            salon.joueurs[sIdBot] = numeroLibere;
-                            salon.bots = salon.bots || {};
-                            salon.bots[numeroLibere] = new BotJoueur(numeroLibere, salon, io);
-                            envoyerMiseAJourSalon(salon);
-                            diffuserEtatGlobal(salon);
-                            if (salon.partie && salon.partie.tourActuel === numeroLibere && !salon.partie.aJoueCeTour) {
-                                salon.bots[numeroLibere].jouerTour();
-                            }
-                        } else if (salon.votesDeconnexion && salon.votesDeconnexion[numeroLibere]) {
-                            // S'il n'y a pas encore eu de décision mais qu'il refuse de rejoindre
-                            delete salon.votesDeconnexion[numeroLibere];
-                            diffuserMessageGlobal(salon, `${profil.pseudo} a abandonné la partie. Remplacement par un Bot.`);
-                            const sIdBot = 'bot-' + Date.now() + Math.floor(Math.random()*1000);
-                            salon.joueurs[sIdBot] = numeroLibere;
-                            salon.bots = salon.bots || {};
-                            salon.bots[numeroLibere] = new BotJoueur(numeroLibere, salon, io);
-                            envoyerMiseAJourSalon(salon);
-                            diffuserEtatGlobal(salon);
-                            if (salon.partie && salon.partie.tourActuel === numeroLibere && !salon.partie.aJoueCeTour) {
-                                salon.bots[numeroLibere].jouerTour();
-                            }
+                            diffuserMessageGlobal(salon, `${profil.pseudo} a abandonné la partie. Remplacement par l'IA Python.`);
+                            
+                            const pythonProcess = spawn('python3', ['client_ia.py', salon.id, numeroLibere.toString()], {
+                                cwd: path.join(__dirname, 'ia')
+                            });
+                            pythonProcess.stdout.on('data', (data) => console.log(`[IA ${salon.id} stdout]: ${data}`));
+                            pythonProcess.stderr.on('data', (data) => console.error(`[IA ${salon.id} stderr]: ${data}`));
                         }
                         return;
                     }
@@ -755,59 +713,23 @@ io.on('connection', (socket) => {
         socket.emit('auth:success', { success: true, userId: null, username: guestName, avatar: '👤', stats: { jouees: 0, gagnees: 0, meilleurScore: 0 } });
     });
     
-    socket.on('soumettreVoteDeconnexion', (data) => {
-        const salon = getSalonPourSocket(socket.id);
-        if (!salon || !salon.votesDeconnexion || !salon.votesDeconnexion[data.numeroJoueur]) return;
+    socket.on('remplacerJoueurIA', (data) => {
+        const { salonId, numero } = data;
+        const salon = salons[salonId];
+        if (!salon) return;
         
-        const voteSession = salon.votesDeconnexion[data.numeroJoueur];
-        if (voteSession.votants.includes(socket.id)) return; // Déjà voté
+        salon.joueurs[socket.id] = numero;
+        joueursDansSalons[socket.id] = salonId;
         
-        voteSession.votants.push(socket.id);
-        if (data.choix === 'attendre') voteSession.attendre++;
-        else if (data.choix === 'bot') voteSession.bot++;
+        // Supprimer toute trace d'un bot ou deconnexion precedente
+        if (salon.enAttenteReconnexion === numero) salon.enAttenteReconnexion = null;
         
-        let totalHumans = Object.keys(salon.joueurs).filter(id => !id.startsWith('bot-')).length;
-        let majority = Math.ceil(totalHumans / 2);
-        if (totalHumans === 0) majority = 0;
+        diffuserMessageGlobal(salon, `L'IA a pris la place du Joueur ${numero}.`);
+        envoyerMiseAJourSalon(salon);
+        diffuserEtatGlobal(salon);
         
-        if (voteSession.attendre >= majority || voteSession.bot >= majority || voteSession.votants.length >= totalHumans) {
-            let decision = (voteSession.bot >= voteSession.attendre) ? 'bot' : 'attendre';
-            delete salon.votesDeconnexion[data.numeroJoueur];
-            
-            if (decision === 'bot') {
-                diffuserMessageGlobal(salon, `Décision : ${data.numeroJoueur} est remplacé par un Bot.`);
-                const sIdBot = 'bot-' + Date.now() + Math.floor(Math.random()*1000);
-                salon.joueurs[sIdBot] = data.numeroJoueur;
-                salon.bots = salon.bots || {};
-                salon.bots[data.numeroJoueur] = new BotJoueur(data.numeroJoueur, salon, io);
-                envoyerMiseAJourSalon(salon);
-                diffuserEtatGlobal(salon);
-                if (salon.partie && salon.partie.tourActuel === data.numeroJoueur && !salon.partie.aJoueCeTour) {
-                    salon.bots[data.numeroJoueur].jouerTour();
-                }
-            } else {
-                diffuserMessageGlobal(salon, `Le jeu est en pause en attendant le joueur ${data.numeroJoueur}... (Remplacement auto dans 2 minutes)`);
-                salon.enAttenteReconnexion = data.numeroJoueur;
-                envoyerMiseAJourSalon(salon);
-                diffuserEtatGlobal(salon);
-                
-                // Timeout de 2 minutes
-                setTimeout(() => {
-                    if (salon && salon.enAttenteReconnexion === data.numeroJoueur) {
-                        diffuserMessageGlobal(salon, `Le temps d'attente est écoulé. Remplacement par un Bot.`);
-                        salon.enAttenteReconnexion = null;
-                        const sIdBot = 'bot-' + Date.now() + Math.floor(Math.random()*1000);
-                        salon.joueurs[sIdBot] = data.numeroJoueur;
-                        salon.bots = salon.bots || {};
-                        salon.bots[data.numeroJoueur] = new BotJoueur(data.numeroJoueur, salon, io);
-                        envoyerMiseAJourSalon(salon);
-                        diffuserEtatGlobal(salon);
-                        if (salon.partie && salon.partie.tourActuel === data.numeroJoueur && !salon.partie.aJoueCeTour) {
-                            salon.bots[data.numeroJoueur].jouerTour();
-                        }
-                    }
-                }, 120000); // 2 minutes
-            }
+        if (salon.partie && salon.partie.tourActuel === numero && !salon.partie.aJoueCeTour) {
+            diffuserChangementTour(salon, numero);
         }
     });
 
