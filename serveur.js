@@ -672,6 +672,10 @@ io.on('connection', (socket) => {
                             salon.enAttenteReconnexion = null;
                         }
                         
+                        if (!salon.joueurs[salon.hote] && !salon.spectateurs.has(salon.hote)) {
+                            salon.hote = socket.id;
+                        }
+                        
                         envoyerMiseAJourSalon(salon);
                         diffuserEtatGlobal(salon);
                         
