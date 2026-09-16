@@ -423,39 +423,6 @@ function autoGroupCartes(ids, extraCard = null) {
                 }
             }
         } else {
-                orphanWildcards.push(c);
-            }
-        } else if (c.valeur === '2') {
-            // Un 2 peut être un wildcard ou former un groupe naturel de 2
-            if (activeGroup) {
-                // Si le groupe actif est déjà un groupe de 2, c'est naturel
-                if (activeGroup.valeur === '2') {
-                    activeGroup.cartesId.push(c.id);
-                } else {
-                    // Sinon, c'est un wildcard pour ce groupe actif
-                    activeGroup.cartesId.push(c.id);
-                }
-            } else {
-                // Pas de groupe actif. Regardons s'il y a déjà un '2' dans les orphelins.
-                let indexOrphan2 = orphanWildcards.findIndex(w => w.valeur === '2');
-                if (indexOrphan2 !== -1) {
-                    // On a trouvé un '2' orphelin ! Ils forment un groupe naturel de 2.
-                    let prev2 = orphanWildcards.splice(indexOrphan2, 1)[0];
-                    let newGroup = { valeur: '2', cartesId: [prev2.id, c.id] };
-                    groups.push(newGroup);
-                    activeGroup = newGroup;
-                    
-                    // Si d'autres orphelins (Jokers) attendaient, ils rejoignent ce groupe
-                    if (orphanWildcards.length > 0) {
-                        orphanWildcards.forEach(w => activeGroup.cartesId.push(w.id));
-                        orphanWildcards = [];
-                    }
-                } else {
-                    // C'est le premier '2', il devient orphelin en attente
-                    orphanWildcards.push(c);
-                }
-            }
-        } else {
             // Carte naturelle (3 à As)
             if (activeGroup && activeGroup.valeur === c.valeur) {
                 // On continue le groupe actif
@@ -701,23 +668,27 @@ document.getElementById('btn-poser').addEventListener('click', () => {
         return;
     }
     
-    // Si on ne ramasse pas la terre et qu'il n'y a qu'un seul groupe (ou que l'équipe a déjà ouvert), on pose directement
-    const monEq = etatGlobal.equipes[etatGlobal.monEquipe];
-    
-    // Prévention des faux départs : si l'équipe n'a pas ouvert, on vérifie que le groupe unique atteint le seuil
-    let meetThreshold = true;
-    if (monEq && !monEq.aOuvert) {
-        let points = 0;
-        grouped.forEach(g => {
-            g.cartesId.forEach(id => {
-                const c = etatGlobal.maMain.find(carte => carte.id === id);
-                if (c) points += c.points;
-            });
+    let usesTerre = false;
+    let points = 0;
+    grouped.forEach(g => {
+        g.cartesId.forEach(id => {
+            const c = etatGlobal.maMain.find(carte => carte.id === id);
+            if (c) {
+                points += c.points;
+            } else if (etatGlobal.carteDessusDefausse && etatGlobal.carteDessusDefausse.id === id) {
+                usesTerre = true;
+                points += etatGlobal.carteDessusDefausse.points;
+            }
         });
-        if (points < monEq.seuilOuverture) meetThreshold = false;
+    });
+
+    const monEq = etatGlobal.equipes[etatGlobal.monEquipe];
+    let meetThreshold = true;
+    if (monEq && !monEq.aOuvert && points < monEq.seuilOuverture) {
+        meetThreshold = false;
     }
 
-    if (!terreSelectionnee && (monEq && monEq.aOuvert || (grouped.length === 1 && meetThreshold))) {
+    if (!usesTerre && (monEq && monEq.aOuvert || (grouped.length === 1 && meetThreshold))) {
         envoyerActionDeJeu('demandeDescendreCombinaison', grouped.map(g => ({ cartesId: g.cartesId })));
         cartesSelectionnees.clear();
         groupesVerrouillesLocaux = [];
@@ -754,6 +725,9 @@ document.getElementById('btn-poser').addEventListener('click', () => {
             cartes: cartesDuGroupe
         });
     });
+    
+    if (usesTerre) terreSelectionnee = true; // S'assurer que le flag est bien mis pour la zone de prepa
+
     
     if (terreSelectionnee) {
         terreSelectionnee = false;
@@ -1352,7 +1326,7 @@ function rendreMelds(equipeData, conteneurId) {
                 }
                 if (!c) c = combi.cartes.find(x => x.valeur !== 'Joker' && x.valeur !== '2') || combi.cartes[0];
                 const color = (c.couleur === 'Coeur' || c.couleur === 'Carreau') ? ' red' : '';
-                const valDisplay = (c.valeur === 'Joker' || c.valeur === '2') ? '★' : (c.valeur === '10' ? '10' : c.valeur[0]);
+                const valDisplay = (c.valeur === 'Joker') ? '★' : (c.valeur === '10' ? '10' : (c.valeur === '2' ? '2' : c.valeur[0]));
                 let isCardHighlight = window.cartesSurlignees && combi.cartes.some(cc => window.cartesSurlignees.includes(cc.id));
                 slot.className = `slot filled${color}` + (isCardHighlight ? ' highlight-card-glow' : '');
                 
@@ -1375,7 +1349,7 @@ function rendreMelds(equipeData, conteneurId) {
                     if (i < combi.cartes.length) {
                         const c = combi.cartes[i];
                         const color = (c.couleur === 'Coeur' || c.couleur === 'Carreau') ? ' red' : '';
-                        const valDisplay = (c.valeur === 'Joker' || c.valeur === '2') ? '★' : (c.valeur === '10' ? '10' : c.valeur[0]);
+                        const valDisplay = (c.valeur === 'Joker') ? '★' : (c.valeur === '10' ? '10' : (c.valeur === '2' ? '2' : c.valeur[0]));
                         let isCardHighlight = window.cartesSurlignees && window.cartesSurlignees.includes(c.id);
                         slot.className = `slot filled${color}` + (isCardHighlight ? ' highlight-card-glow' : '');
                         
@@ -1463,7 +1437,7 @@ function rendreMelds(equipeData, conteneurId) {
             g.cartes.forEach(c => {
                 const slot = document.createElement('div');
                 const color = (c.couleur === 'Coeur' || c.couleur === 'Carreau') ? ' red' : '';
-                const valDisplay = (c.valeur === 'Joker' || c.valeur === '2') ? '★' : (c.valeur === '10' ? '10' : c.valeur[0]);
+                const valDisplay = (c.valeur === 'Joker') ? '★' : (c.valeur === '10' ? '10' : (c.valeur === '2' ? '2' : c.valeur[0]));
                 slot.className = `slot filled${color}`;
                 slot.textContent = valDisplay;
                 slotsDiv.appendChild(slot);
@@ -2522,3 +2496,12 @@ if (btnFermerRegles) {
         modalRegles.style.display = 'none';
     });
 }
+socket.on('disconnect', () => {
+    const overlay = document.getElementById('modal-deconnexion');
+    if (overlay) overlay.style.display = 'flex';
+});
+
+socket.on('connect', () => {
+    const overlay = document.getElementById('modal-deconnexion');
+    if (overlay) overlay.style.display = 'none';
+});

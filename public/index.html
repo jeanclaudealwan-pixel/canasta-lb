@@ -383,6 +383,12 @@
 </div>
 
     <div id="modal-overlay" style="display:none;">
+        <div id="modal-deconnexion" class="modal-panel" style="display:none; text-align: center;">
+            <h2 style="color: var(--red); margin-bottom: 20px;">⚠️ Connexion Perdue</h2>
+            <p>Le jeu tente de se reconnecter au serveur...</p>
+            <p style="font-size: 2em; animation: pulse 1.5s infinite;">⏳</p>
+            <style>@keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }</style>
+        </div>
         <div id="modal-scores" class="modal-panel" style="display:none; max-width: 800px; width: 90%;">
             <h2>📊 Scores de la Manche</h2>
             <div id="contenu-scores"></div>

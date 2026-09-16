@@ -806,15 +806,20 @@ def jouer_coup():
 # ÉVÉNEMENTS SOCKET
 # ═══════════════════════════════════════════════════════════════════════
 cible_salon_id = sys.argv[1] if len(sys.argv) > 1 else None
+cible_siege = sys.argv[2] if len(sys.argv) > 2 else None
 a_rejoint = False
 
 @sio.event
 def connect():
     global a_rejoint
     print('Connexion au serveur réussie !')
-    sio.emit('setProfil', {'pseudo': 'IA Expert V3', 'avatar': '🧠', 'token': f'ia_{uuid.uuid4()}', 'dbId': None})
+    sio.emit('setProfil', {'pseudo': 'IA Expert V3', 'avatar': '🤖', 'token': f'ia_{uuid.uuid4()}', 'dbId': None})
     
-    if cible_salon_id:
+    if cible_salon_id and cible_siege:
+        print(f"Remplacement du siege {cible_siege} dans le salon : {cible_salon_id}")
+        sio.emit('remplacerJoueurIA', {'salonId': cible_salon_id, 'numero': int(cible_siege)})
+        a_rejoint = True
+    elif cible_salon_id:
         print(f"Rejoindre le salon ciblé : {cible_salon_id}")
         sio.emit('rejoindreSalon', cible_salon_id)
         a_rejoint = True
@@ -844,6 +849,11 @@ def on_mise_a_jour(etat):
     global etat_actuel, mon_numero, en_attente_action
     etat_actuel = etat
     mon_numero = etat.get('monNumero')
+    
+    if etat.get('partieTerminee'):
+        print("Partie terminǸe. ArrǦt du bot.")
+        sys.exit(0)
+        
     if etat.get('enJeu') and etat.get('tourActuel') == mon_numero:
         en_attente_action = True
         jouer_coup()
@@ -925,6 +935,7 @@ def on_resultat_sortie(data):
 @sio.on('disconnect')
 def disconnect():
     print('Déconnecté du serveur.')
+    sys.exit(0)
 
 if __name__ == '__main__':
     sio.autorisation_sortie = None
